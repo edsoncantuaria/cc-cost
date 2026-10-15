@@ -25,6 +25,6 @@ export type Gasto = {
 declare module 'claude-code' {
   interface PluginState {
     /** `compactando`: qual compactação o botão está rodando; null fora dela. */
-    gasto: { tokens: Gasto | null; compactando: Modo | null }
+    'cc-cost': { tokens: Gasto | null; compactando: Modo | null }
   }
 }

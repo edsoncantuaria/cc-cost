@@ -26,14 +26,13 @@ ccusage estimates API cost in dollars from past logs. On a Pro/Max subscription 
 ## Install
 Copy the folder into `~/.claude/mods/` (user scope only):
 ```bash
-git clone https://github.com/edsoncantuaria/cc-cost ~/.claude/mods/gasto
-claude plugin validate ~/.claude/mods/gasto
+git clone https://github.com/edsoncantuaria/cc-cost ~/.claude/mods/cc-cost
+claude plugin validate ~/.claude/mods/cc-cost
 ```
-The internal plugin id is still `gasto`.
 
 ## Test
 ```bash
-claude plugin test ~/.claude/mods/gasto
+claude plugin test ~/.claude/mods/cc-cost
 ```
 
 ## Privacy

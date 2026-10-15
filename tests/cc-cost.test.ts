@@ -80,7 +80,7 @@ async function turno($: Engine, turnId: string, ...modelos: string[]) {
 }
 
 async function faixa($: Engine, surface: 'terminal' | 'desktop' = 'terminal'): Promise<string> {
-  const ui = await $.ui.mount({ plugin: 'gasto', surface, ...BAND })
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface, ...BAND })
   const texto = (await ui.find({ type: 'Text', text: /tokens/ }))?.text ?? ''
   await ui.unmount()
 
@@ -125,7 +125,7 @@ test('compactação soma só o resumo e não mexe nas barras', async ($, on) => 
   // /compact entre turnos: o fork do engine tem agentId que nenhuma lista nomeia.
   await passo($, 'fork', 'compactacao', 'fork-compactacao')
 
-  const ui = await $.ui.mount({ plugin: 'gasto', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   // Duas barras: t1 (3 × 2.500, com o subagente) e t2 (240.000, a maior).
   expect(await ui.find({ type: 'Text', text: '▁█  ' })).toBeDefined()
   await ui.unmount()
@@ -198,7 +198,7 @@ test('sem nenhum dado ainda, a faixa não aparece', async ($, on) => {
   })
   await iniciar($)
 
-  const ui = await $.ui.mount({ plugin: 'gasto', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: /tokens/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'engine' })).toBeDefined()
   await ui.unmount()
@@ -210,7 +210,7 @@ async function contexto($: Engine, tokens: number) {
 
 /** Aperta o botão da faixa, como o clique ou a tecla c. */
 async function apertar($: Engine) {
-  const ui = await $.ui.mount({ plugin: 'gasto', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   await ui.press({ key: 'compactar' })
   await ui.unmount()
 }
@@ -221,7 +221,7 @@ test('indicador de contexto muda de cor em 140k e 170k', async ($, on) => {
 
   for (const [tokens, cor, rotulo] of [[97_000, 'green', '97k'], [152_000, 'yellow', '152k'], [181_000, 'red', '181k']] as const) {
     await contexto($, tokens)
-    const ui = await $.ui.mount({ plugin: 'gasto', surface: 'terminal', ...BAND })
+    const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
     const valor = await ui.find({ type: 'Text', text: new RegExp(`^${rotulo}$`) })
     expect(valor?.props.color).toBe(cor)
     expect(await ui.find({ type: 'Button', key: 'compactar' })).toBeDefined()
@@ -240,7 +240,7 @@ test('compactar sem leituras pesando: resume com foco e o ctx cai para o que fic
 
   expect(pedidos).toHaveLength(1)
   expect(pedidos[0]).toMatch(/pendências/)
-  const ui = await $.ui.mount({ plugin: 'gasto', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect((await ui.find({ type: 'Text', text: /^15k$/ }))?.props.color).toBe('green')
   await ui.unmount()
 })
@@ -259,7 +259,7 @@ test('compactação que falha avisa e não mexe no contexto', async ($, on) => {
 
   expect(avisos).toHaveLength(1)
   expect(avisos[0]).toMatch(/Não consegui compactar/)
-  const ui = await $.ui.mount({ plugin: 'gasto', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: '181k' })).toBeDefined()
   await ui.unmount()
 })
@@ -269,7 +269,7 @@ test('botão some enquanto o modelo trabalha', async ($, on) => {
   await iniciar($)
   await contexto($, 181_000)
 
-  const ui = await $.ui.mount({ plugin: 'gasto', surface: 'terminal', ...BAND, props: { ...BAND.props, isWorking: true } })
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND, props: { ...BAND.props, isWorking: true } })
   expect(await ui.find({ type: 'Button', key: 'compactar' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: '181k' })).toBeDefined()
   await ui.unmount()
@@ -295,7 +295,7 @@ test('compactação troca o contexto pelo tamanho que ela deixou', async ($, on)
   // A pré-computação não instala nada: o contexto continua o mesmo.
   await $.session.compact({ trigger: 'precompute', messages: RESUMO } as never)
   const lido = async () => {
-    const ui = await $.ui.mount({ plugin: 'gasto', surface: 'terminal', ...BAND })
+    const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
     const valor = await ui.find({ type: 'Text', text: /^\d+(,\d)?k$/ })
     await ui.unmount()
 
@@ -314,7 +314,7 @@ test('limiares do contexto saem da janela de compactação', async ($, on) => {
   // Janela de 120k: amarelo a partir de 60k, vermelho a partir de 90k.
   for (const [tokens, cor, rotulo] of [[50_000, 'green', '50k'], [70_000, 'yellow', '70k'], [95_000, 'red', '95k']] as const) {
     await contexto($, tokens)
-    const ui = await $.ui.mount({ plugin: 'gasto', surface: 'terminal', ...BAND })
+    const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
     expect((await ui.find({ type: 'Text', text: new RegExp(`^${rotulo}$`) }))?.props.color).toBe(cor)
     expect(await ui.find({ type: 'Text', text: '/120k' })).toBeDefined()
     await ui.unmount()
@@ -377,7 +377,7 @@ test('micro não informa o tamanho: o ctx desconta o que saiu das mensagens', as
   await $.session.compact({ trigger: 'manual', instructions: 'micro', messages: comLeitura() } as never)
 
   // 181k menos os ~100k da leitura (o marcador que fica é desprezível).
-  const ui = await $.ui.mount({ plugin: 'gasto', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: /^81k$/ })).toBeDefined()
   await ui.unmount()
 })

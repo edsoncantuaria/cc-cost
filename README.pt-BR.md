@@ -26,14 +26,13 @@ O ccusage estima o custo de API em dólar a partir dos logs passados. Na assinat
 ## Instalação
 Copie a pasta para `~/.claude/mods/` (só escopo de usuário):
 ```bash
-git clone https://github.com/edsoncantuaria/cc-cost ~/.claude/mods/gasto
-claude plugin validate ~/.claude/mods/gasto
+git clone https://github.com/edsoncantuaria/cc-cost ~/.claude/mods/cc-cost
+claude plugin validate ~/.claude/mods/cc-cost
 ```
-O id interno do plugin continua `gasto`.
 
 ## Testes
 ```bash
-claude plugin test ~/.claude/mods/gasto
+claude plugin test ~/.claude/mods/cc-cost
 ```
 
 ## Privacidade

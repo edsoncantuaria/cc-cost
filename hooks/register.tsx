@@ -3,8 +3,8 @@ import type { EngineInterface, ModelUsage, Register, SessionMessage, SessionRate
 
 import type { Gasto, Limite, Modo, Tokens } from '../types'
 
-const gasto = atom({ plugin: 'gasto', key: 'tokens' } as const, null)
-const compactando = atom({ plugin: 'gasto', key: 'compactando' } as const, null)
+const gasto = atom({ plugin: 'cc-cost', key: 'tokens' } as const, null)
+const compactando = atom({ plugin: 'cc-cost', key: 'compactando' } as const, null)
 
 const BARRAS = 12
 const DIAS_GUARDADOS = 7
