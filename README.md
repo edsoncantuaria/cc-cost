@@ -14,6 +14,7 @@ A minimal Claude Code mod that shows a status band above the prompt with what yo
 - **Usage limits** from Claude Code: 5h, 7d and spend limit, colored as they rise.
 - **Current context** size against the auto-compact window, turning yellow and then red before autocompact kicks in.
 - **Sparkline** of new tokens per turn.
+- **Running subagents**: count and the largest subagent context, colored against the compaction window. Subagent tokens count toward today but stay out of the session total and the per-turn bars.
 - **Compact button** that picks the cheaper option: `/compact micro` (needs the micro-compaction plugin) when file reads are 40%+ of the context, otherwise the native `/compact` with a focused summary prompt.
 
 ## Why not ccusage?

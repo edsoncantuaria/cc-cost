@@ -20,6 +20,8 @@ export type Gasto = {
   contexto: number | null
   /** Janela de compactação (autoCompactWindow), de onde saem os limiares do ctx; null até a primeira leitura. */
   janela: number | null
+  /** Contexto de cada subagente rodando (entrada da última resposta dele), 0 antes da primeira; o ctx é só da thread principal. */
+  agentes?: Record<string, number>
 }
 
 declare module 'claude-code' {

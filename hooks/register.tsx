@@ -11,7 +11,7 @@ const DIAS_GUARDADOS = 7
 const NIVEIS = '▁▂▃▄▅▆▇█'
 const ROTULO: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'limite' }
 const ZERO: Tokens = { entrada: 0, saida: 0, cacheLido: 0, cacheEscrito: 0 }
-const VAZIO: Gasto = { sessao: ZERO, hoje: 0, proprio: { chave: '', n: 0 }, turnos: [], emTurno: false, limites: [], contexto: null, janela: null }
+const VAZIO: Gasto = { sessao: ZERO, hoje: 0, proprio: { chave: '', n: 0 }, turnos: [], emTurno: false, limites: [], contexto: null, janela: null, agentes: {} }
 
 // Folga até a janela de compactação: o vermelho deixa ~30k para compactar antes do autocompact.
 const FOLGA_ATENCAO = 60_000
@@ -85,6 +85,22 @@ async function janelaCompactacao($: EngineInterface): Promise<number> {
   return context.breakdown?.rawMaxTokens ?? context.window
 }
 
+/** Atualiza a lista de subagentes rodando; `null` tira o agente. */
+function agente($: EngineInterface, id: string, mudar: (atual: number | undefined) => number | null | undefined) {
+  return enfileirar(() =>
+    update($, gasto, a => {
+      const g = a ?? VAZIO
+      const agentes = { ...g.agentes }
+      const novo = mudar(agentes[id])
+      if (novo === undefined) return g
+      if (novo === null) delete agentes[id]
+      else agentes[id] = novo
+
+      return { ...g, agentes }
+    }).then(() => undefined),
+  )
+}
+
 function limites(janelas: readonly SessionRateLimit[]): Limite[] {
   return janelas.map(({ kind, percentUsed, resetsAt }) => ({ kind, percentUsed, ...(resetsAt ? { resetsAt } : {}) }))
 }
@@ -121,7 +137,8 @@ function enfileirar(tarefa: () => Promise<void>): Promise<void> {
   return vez
 }
 
-async function somar($: EngineInterface, usage: ModelUsage) {
+/** Subagente fica fora da sessão e das barras (que são da thread principal), mas entra no `hoje`. */
+async function somar($: EngineInterface, usage: ModelUsage, principal: boolean) {
   const t: Tokens = {
     entrada: usage.input_tokens,
     saida: usage.output_tokens,
@@ -141,7 +158,8 @@ async function somar($: EngineInterface, usage: ModelUsage) {
 
   await update($, gasto, a => {
     const g = a ?? VAZIO
-    // Subagentes do turno caem na barra dele; compactação e trabalho fora de turno só no total.
+    if (!principal) return { ...g, hoje: totalHoje, proprio }
+    // Compactação e trabalho fora de turno só no total.
     const turnos = g.emTurno && g.turnos.length > 0
       ? [...g.turnos.slice(0, -1), (g.turnos.at(-1) ?? 0) + n]
       : g.turnos
@@ -228,14 +246,21 @@ export const register: Register = on => {
         limites: rateLimits.length > 0 ? limites(rateLimits) : (a?.limites ?? []),
         contexto: context.tokens ?? a?.contexto ?? null,
         janela,
+        // No reload do mod a lista antiga pode ter agente que já acabou; quem segue rodando volta no próximo passo.
+        agentes: {},
       }))
     })
 
     return next(e)
   })
 
-  // Só a thread principal abre turno: cada turno é uma barra.
+  // Só a thread principal abre turno: cada turno é uma barra. O subagente entra na lista dos que rodam.
   on('turn.start', async ($, e, next) => {
+    if (e.agentId !== undefined) {
+      await agente($, e.agentId, atual => atual ?? 0)
+
+      return next(e)
+    }
     await enfileirar(() =>
       update($, gasto, a => {
         const g = a ?? VAZIO
@@ -250,16 +275,26 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       await enfileirar(() => update($, gasto, a => (a ? { ...a, emTurno: false } : a)).then(() => undefined))
+    } else {
+      await agente($, e.agentId, () => null)
     }
 
     return next(e)
   })
 
   // Cada requisição ao modelo: thread principal, subagente ou processo do engine (compactação).
+  // A compactação vem com agentId mas sem turn.start: fica fora da lista e conta como da thread principal.
   on('turn.step', async function* ($, e, next) {
     const resposta = yield* next(e)
     const usage = resposta.usage
-    if (usage) await enfileirar(() => somar($, usage))
+    if (!usage) return resposta
+    const id = e.agentId
+    const subagente = id !== undefined && (await read($, gasto))?.agentes?.[id] !== undefined
+    await enfileirar(() => somar($, usage, !subagente))
+    if (subagente) {
+      const ocupado = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+      await agente($, id, atual => (atual === undefined ? undefined : ocupado))
+    }
 
     return resposta
   })
@@ -317,7 +352,7 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') {
       await enfileirar(() =>
-        update($, gasto, a => (a ? { ...a, sessao: ZERO, turnos: [], emTurno: false, contexto: null } : a)).then(() => undefined),
+        update($, gasto, a => (a ? { ...a, sessao: ZERO, turnos: [], emTurno: false, contexto: null, agentes: {} } : a)).then(() => undefined),
       )
     }
 
@@ -338,6 +373,9 @@ export const register: Register = on => {
     const ocupado = e.props.isWorking || emCurso !== null
     const cache = entradaTotal > 0 ? Math.round((s.cacheLido / entradaTotal) * 100) : 0
     const ponto = <Text dimColor>  ·  </Text>
+    // Antes da primeira resposta o subagente ainda não tem contexto medido.
+    const agentes = Object.values(g.agentes ?? {}).filter(n => n > 0)
+    const maior = Math.max(0, ...agentes)
 
     return (
       <Box paddingX={1} flexDirection="row">
@@ -376,6 +414,13 @@ export const register: Register = on => {
             <Text dimColor>ctx </Text>
             <Text color={corContexto(g.contexto, g.janela)}>{compacto(g.contexto)}</Text>
             {g.janela !== null && <Text dimColor>/{compacto(g.janela)}</Text>}
+          </Text>
+        )}
+        {agentes.length > 0 && (
+          <Text>
+            {ponto}
+            <Text dimColor>{agentes.length === 1 ? 'agente ' : `${agentes.length} agentes, maior `}</Text>
+            <Text color={corContexto(maior, g.janela)}>{compacto(maior)}</Text>
           </Text>
         )}
         <Text>  </Text>

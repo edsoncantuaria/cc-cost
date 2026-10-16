@@ -119,18 +119,64 @@ test('compactação soma só o resumo e não mexe nas barras', async ($, on) => 
   await $.turn.start({ text: '', turnId: 't1' })
   await passo($, 't1', 'a')
   await passo($, 't1', 'a')
-  await passo($, 'sub', 'a', 'agente-1')
   await $.turn.complete({ turnId: 't1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
   await turno($, 't2', 'b')
-  // /compact entre turnos: o fork do engine tem agentId que nenhuma lista nomeia.
+  // /compact entre turnos: o fork do engine tem agentId mas não abre turno.
   await passo($, 'fork', 'compactacao', 'fork-compactacao')
 
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
-  // Duas barras: t1 (3 × 2.500, com o subagente) e t2 (240.000, a maior).
+  // Duas barras: t1 (2 × 2.500) e t2 (240.000, a maior).
   expect(await ui.find({ type: 'Text', text: '▁█  ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /agente/ })).toBeUndefined()
   await ui.unmount()
-  // 7.500 + 240.000 + 5.000 do resumo; os 168k relidos do cache não entram.
-  expect(await faixa($)).toMatch(/253k tokens/)
+  // 5.000 + 240.000 + 5.000 do resumo; os 168k relidos do cache não entram.
+  expect(await faixa($)).toMatch(/250k tokens/)
+})
+
+test('subagente mostra o próprio contexto e fica fora do resto da faixa', async ($, on) => {
+  preparar(on)
+  await iniciar($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await passo($, 't1', 'a')
+  await contexto($, 97_000)
+  await $.turn.start({ text: 'tarefa', turnId: 'sub1', agentId: 'agente-1' })
+
+  // Antes da primeira resposta o subagente ainda não aparece.
+  let ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
+  expect(await ui.find({ type: 'Text', text: /agente/ })).toBeUndefined()
+  await ui.unmount()
+
+  await passo($, 'sub1', 'a', 'agente-1')
+  ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
+  // Entrada da última resposta do subagente: 1.000 + 8.000 + 1.000.
+  expect(await ui.find({ type: 'Text', text: 'agente ' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^10k$/ }))?.props.color).toBe('green')
+  // O ctx segue o da thread principal.
+  expect(await ui.find({ type: 'Text', text: /^97k$/ })).toBeDefined()
+  await ui.unmount()
+
+  await $.turn.start({ text: 'outra', turnId: 'sub2', agentId: 'agente-2' })
+  await passo($, 'sub2', 'b', 'agente-2')
+  ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
+  expect(await ui.find({ type: 'Text', text: '2 agentes, maior ' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^1,2M$/ }))?.props.color).toBe('red')
+  await ui.unmount()
+
+  for (const [turnId, agentId] of [['sub1', 'agente-1'], ['sub2', 'agente-2']] as const) {
+    await $.turn.complete({ turnId, answer: '', durationMs: 1, isAborted: false, reason: 'answer', agentId })
+  }
+  await $.turn.complete({ turnId: 't1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
+
+  ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
+  expect(await ui.find({ type: 'Text', text: /agente/ })).toBeUndefined()
+  // Uma barra só: os subagentes não abrem turno.
+  expect(await ui.find({ type: 'Text', text: '█  ' })).toBeDefined()
+  await ui.unmount()
+  // Sessão e ↑↓ só da thread principal; o hoje soma os subagentes (2.500 + 2.500 + 240.000).
+  const texto = await faixa($)
+  expect(texto).toMatch(/2,5k tokens/)
+  expect(texto).toMatch(/↑ 2,0k {2}↓ 500/)
+  expect(texto).toMatch(/hoje 245k/)
 })
 
 test('hoje soma as outras sessões, retoma a própria e poda dias velhos', async ($, on) => {

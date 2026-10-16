@@ -14,6 +14,7 @@ Mod minimalista para o Claude Code que mostra uma faixa acima do prompt com o qu
 - **Limites de uso** do Claude Code: 5h, 7d e limite de gasto, com cor conforme sobem.
 - **Contexto atual** contra a janela do autocompact, ficando amarelo e depois vermelho antes do autocompact.
 - **Sparkline** de tokens novos por turno.
+- **Subagentes rodando**: quantos e o maior contexto entre eles, com cor conforme a janela de compactação. Os tokens dos subagentes entram no total do dia, mas ficam fora do total da sessão e das barras por turno.
 - **Botão de compactar** que escolhe o mais barato: `/compact micro` (precisa do plugin micro-compaction) quando leituras de arquivo passam de 40% do contexto; senão, o `/compact` nativo com um resumo focado.
 
 ## Por que não o ccusage?

@@ -1,6 +1,6 @@
 {
   "name": "cc-cost",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Faixa minimalista acima do prompt com os tokens da sessão, do dia e os limites de uso",
   "types": "./types/index.d.ts"
 }
