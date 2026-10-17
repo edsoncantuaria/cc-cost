@@ -117,6 +117,20 @@ To load the clone in every session, set `CLAUDE_CODE_PLUGIN_DIRS` to its folder 
 > [!WARNING]
 > Copying the folder alone doesn't load it. And don't combine a local clone with the marketplace install, or the band is drawn twice.
 
+### Code layout
+
+| File | Owns |
+| --- | --- |
+| `hooks/register.tsx` | wiring only: which event calls what |
+| `hooks/accounting.ts` | token counting, the daily store, context thresholds |
+| `hooks/compaction.ts` | the compact button's policy (micro vs. summary), the 🔴 notice, the micro-compaction contract |
+| `hooks/band.tsx` | drawing the band |
+| `hooks/texts.ts` | translations and number formatting |
+| `hooks/state.ts` | the session state (`$.state` atoms); the only file that reads or writes it |
+| `hooks/runtime.ts` | write ordering and `safe`, which keeps a failure of the mod out of your turn |
+
+Everything the mod remembers lives in the session's `$.state` (or `$.store` for the daily totals), so a hot reload keeps it; the module itself holds no mutable state. What cc-cost assumes about the micro-compaction plugin (which ships no types) is gathered in one `MICRO` object in `compaction.ts`.
+
 ## 🔒 Privacy
 
 No network, no telemetry. It only reads the session usage Claude Code already provides and keeps daily counters in the mod's local store.

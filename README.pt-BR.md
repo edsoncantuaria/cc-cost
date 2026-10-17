@@ -117,6 +117,20 @@ Para carregar o clone em toda sessão, defina `CLAUDE_CODE_PLUGIN_DIRS` com a pa
 > [!WARNING]
 > Só copiar a pasta não carrega o mod. E não combine o clone local com a instalação pelo marketplace, senão a faixa aparece duas vezes.
 
+### Organização do código
+
+| Arquivo | Responsável por |
+| --- | --- |
+| `hooks/register.tsx` | só a ligação: qual evento chama o quê |
+| `hooks/accounting.ts` | contagem de tokens, o store diário, os limiares de contexto |
+| `hooks/compaction.ts` | a política do botão compact (micro ou resumo), o aviso 🔴, o contrato com o micro-compaction |
+| `hooks/band.tsx` | o desenho da faixa |
+| `hooks/texts.ts` | traduções e formatação de números |
+| `hooks/state.ts` | o estado da sessão (atoms do `$.state`); o único arquivo que o lê ou escreve |
+| `hooks/runtime.ts` | a ordem das escritas e o `safe`, que impede uma falha do mod de chegar ao seu turno |
+
+Tudo o que o mod guarda fica no `$.state` da sessão (ou no `$.store`, para os totais do dia), então sobrevive a hot reload; o módulo em si não tem estado mutável. O que o cc-cost supõe sobre o plugin micro-compaction (que não publica tipos) está reunido num objeto `MICRO`, em `compaction.ts`.
+
 ## 🔒 Privacidade
 
 Sem rede e sem telemetria. Só lê o uso da sessão que o Claude Code já fornece e guarda contadores diários no store local do mod.

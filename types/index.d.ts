@@ -3,6 +3,9 @@ export type Tokens = { input: number; output: number; cacheRead: number; cacheWr
 /** micro: drops the file reads (micro-compaction plugin); summary: the native /compact. */
 export type Mode = 'micro' | 'summary'
 
+/** Language of the band and its notices. */
+export type Language = 'en' | 'pt-BR' | 'es'
+
 export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
 
 export type Spend = {
@@ -30,7 +33,17 @@ export type Spend = {
 
 declare module 'claude-code' {
   interface PluginState {
-    /** `compacting`: which compaction the button is running; null outside one. `failing`: hooks whose last run failed; null when all are fine. */
-    'cc-cost': { spend: Spend | null; compacting: Mode | null; failing: string[] | null }
+    /**
+     * `compacting`: which compaction the button is running; null outside one. `failing`: hooks whose last run
+     * failed; null when all are fine. `warned`: whether the counting-failure toast already went out this session.
+     * `language`: the language resolved from the option or the locale; null until the first resolution.
+     */
+    'cc-cost': {
+      spend: Spend | null
+      compacting: Mode | null
+      failing: string[] | null
+      warned: boolean
+      language: Language | null
+    }
   }
 }
