@@ -1,7 +1,13 @@
 {
   "name": "cc-cost",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Minimal band above the prompt with session and daily tokens, context and usage limits",
+  "author": {
+    "name": "edsoncantuaria",
+    "url": "https://github.com/edsoncantuaria"
+  },
+  "homepage": "https://github.com/edsoncantuaria/cc-cost",
+  "license": "MIT",
   "types": "./types/index.d.ts",
   "userConfig": {
     "language": {

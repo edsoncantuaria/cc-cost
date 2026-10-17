@@ -1,5 +1,6 @@
 {
   "name": "cc-cost",
+  "description": "cc-cost: a live band above the Claude Code prompt with session and daily tokens, context and usage limits",
   "owner": { "name": "edsoncantuaria" },
   "plugins": [{ "name": "cc-cost", "source": "./" }]
 }

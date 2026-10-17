@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import type { Engine } from 'claude-code/testing'
+import type { Engine, MockClock } from 'claude-code/testing'
 import type { On, RenderElement, SessionRateLimit } from 'claude-code'
 
 const BAND = {
@@ -14,60 +14,60 @@ const BAND = {
   },
 } as const
 
-// 5 de outubro de 2026, meio-dia local.
-const AGORA = new Date(2026, 9, 5, 12).getTime()
-const HOJE = '2026-10-05'
+// October 5, 2026, local noon.
+const NOW = new Date(2026, 9, 5, 12).getTime()
+const TODAY = '2026-10-05'
 
-const USOS: Record<string, { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }> = {
+const USAGES: Record<string, { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }> = {
   a: { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 8000, cache_creation_input_tokens: 1000 },
   b: { input_tokens: 200_000, output_tokens: 40_000, cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 0 },
-  // O resumo da compactação: relê a conversa inteira do cache e escreve o resumo.
-  compactacao: { input_tokens: 0, output_tokens: 5000, cache_read_input_tokens: 168_000, cache_creation_input_tokens: 0 },
+  // The compaction summary: rereads the whole conversation from cache and writes the summary.
+  compaction: { input_tokens: 0, output_tokens: 5000, cache_read_input_tokens: 168_000, cache_creation_input_tokens: 0 },
 }
 
-type Mundo = { sessionId: string; store: Map<string, unknown>; mensagens: unknown[] }
+type World = { sessionId: string; store: Map<string, unknown>; messages: unknown[]; clock: MockClock }
 
-function preparar(
+function setup(
   on: On,
-  opcoes: {
+  opts: {
     store?: Record<string, unknown>
     rateLimits?: SessionRateLimit[]
-    janela?: number
-    mensagens?: unknown[]
-    abaixo?: string
+    window?: number
+    messages?: unknown[]
+    below?: string
     env?: Record<string, string>
-    storeQuebrado?: boolean
+    brokenStore?: boolean
   } = {},
-): Mundo {
-  const mundo = { sessionId: 'sessao-a', store: new Map(Object.entries(opcoes.store ?? {})), mensagens: opcoes.mensagens ?? [] }
-  mock.clock(on, { now: AGORA })
-  // O idioma sai do locale: os testes leem a faixa em português, salvo quem pede outro.
-  mock.env(on, opcoes.env ?? { LANG: 'pt_BR.UTF-8' })
-  // Store em memória à vista do teste, para conferir o que cada sessão gravou.
-  on('store.get', (_$, e) => ({ value: mundo.store.get(e.key) }))
+): World {
+  const clock = mock.clock(on, { now: NOW })
+  const world = { sessionId: 'session-a', store: new Map(Object.entries(opts.store ?? {})), messages: opts.messages ?? [], clock }
+  // The language comes from the locale: the tests read the band in Portuguese, unless one asks for another.
+  mock.env(on, opts.env ?? { LANG: 'pt_BR.UTF-8' })
+  // In-memory store in the test's view, to check what each session wrote.
+  on('store.get', (_$, e) => ({ value: world.store.get(e.key) }))
   on('store.set', (_$, e) => {
-    if (opcoes.storeQuebrado) throw new Error('disco cheio')
-    mundo.store.set(e.key, e.value)
+    if (opts.brokenStore) throw new Error('disk full')
+    world.store.set(e.key, e.value)
 
     return { value: undefined }
   })
-  on('store.delete', (_$, e) => (mundo.store.delete(e.key), { value: undefined }))
-  on('store.keys', () => ({ value: [...mundo.store.keys()] }))
-  // O que vem depois do mod na cadeia do AbovePrompt: vazio, ou o texto de outro mod.
+  on('store.delete', (_$, e) => (world.store.delete(e.key), { value: undefined }))
+  on('store.keys', () => ({ value: [...world.store.keys()] }))
+  // What comes after the mod in the AbovePrompt chain: empty, or another mod's text.
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
-    if (opcoes.abaixo === undefined) return h(Fragment, null) as never
+    if (opts.below === undefined) return h(Fragment, null) as never
     const { Text } = $.ui.resolve(e)
 
-    return h(Text, null, opcoes.abaixo) as never
+    return h(Text, null, opts.below) as never
   })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
-  on('session.id', () => ({ value: mundo.sessionId }))
-  on('session.messages', () => ({ value: mundo.mensagens as never }))
-  // Sem `janela`, o breakdown não vem e vale a janela do modelo (200k).
+  on('session.id', () => ({ value: world.sessionId }))
+  on('session.messages', () => ({ value: world.messages as never }))
+  // Without `window` no breakdown comes and the model's window (200k) applies.
   on('session.usage', (_$, e) => {
-    const breakdown = e.breakdown && opcoes.janela ? { breakdown: { rawMaxTokens: opcoes.janela } as never } : {}
+    const breakdown = e.breakdown && opts.window ? { breakdown: { rawMaxTokens: opts.window } as never } : {}
 
-    return { value: { startedAt: AGORA, context: { window: 200000, ...breakdown }, rateLimits: opcoes.rateLimits ?? [] } }
+    return { value: { startedAt: NOW, context: { window: 200000, ...breakdown }, rateLimits: opts.rateLimits ?? [] } }
   })
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
@@ -80,44 +80,44 @@ function preparar(
       answer: '',
       toolUses: [],
       stopReason: 'end_turn' as const,
-      usage: { ...USOS[e.model]!, model: e.model },
+      usage: { ...USAGES[e.model]!, model: e.model },
     }
   })
 
-  return mundo
+  return world
 }
 
-/** O "model" do passo escolhe qual uso de USOS a resposta falsa devolve. */
-async function passo($: Engine, turnId: string, model: string, agentId?: string) {
+/** The step's "model" picks which entry of USAGES the fake response returns. */
+async function step($: Engine, turnId: string, model: string, agentId?: string) {
   const stream = $.turn.step({ turnId, index: 0, model, messageCount: 1, ...(agentId ? { agentId } : {}) })
   for await (const _ of stream) {
-    // só consome
+    // only drains
   }
 }
 
-async function turno($: Engine, turnId: string, ...modelos: string[]) {
+async function turn($: Engine, turnId: string, ...models: string[]) {
   await $.turn.start({ text: '', turnId })
-  for (const m of modelos) await passo($, turnId, m)
+  for (const m of models) await step($, turnId, m)
   await $.turn.complete({ turnId, answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
 }
 
-async function faixa($: Engine, surface: 'terminal' | 'desktop' = 'terminal'): Promise<string> {
+async function band($: Engine, surface: 'terminal' | 'desktop' = 'terminal'): Promise<string> {
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface, ...BAND })
-  const texto = (await ui.find({ type: 'Text', text: /tokens/ }))?.text ?? ''
+  const text = (await ui.find({ type: 'Text', text: /tokens/ }))?.text ?? ''
   await ui.unmount()
 
-  return texto
+  return text
 }
 
-async function iniciar($: Engine) {
+async function start($: Engine) {
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 }
 
-test('conta só tokens novos: leitura de cache vira percentual', async ($, on) => {
-  preparar(on)
-  await iniciar($)
-  await turno($, 't1', 'a')
-  await turno($, 't2', 'b')
+test('counts only new tokens: cache reads become a percentage', async ($, on) => {
+  setup(on)
+  await start($)
+  await turn($, 't1', 'a')
+  await turn($, 't2', 'b')
   await $.session.measure({
     context: { window: 200000 },
     rateLimits: [{ kind: 'five_hour', percentUsed: 62 }],
@@ -125,142 +125,180 @@ test('conta só tokens novos: leitura de cache vira percentual', async ($, on) =
   })
 
   for (const surface of ['terminal', 'desktop'] as const) {
-    const texto = await faixa($, surface)
-    // novos: 2.500 + 240.000; o 1.008.000 lido do cache fica fora.
-    expect(texto).toMatch(/243k tokens/)
-    expect(texto).toMatch(/↑ 202k {2}↓ 41k/)
-    expect(texto).toMatch(/cache 83%/)
-    expect(texto).toMatch(/hoje 243k/)
-    expect(texto).toMatch(/5h 62%/)
+    const text = await band($, surface)
+    // New: 2,500 + 240,000; the 1,008,000 read from cache stays out.
+    expect(text).toMatch(/243k tokens/)
+    expect(text).toMatch(/↑ 202k {2}↓ 41k/)
+    expect(text).toMatch(/cache 83%/)
+    expect(text).toMatch(/hoje 243k/)
+    expect(text).toMatch(/5h 62%/)
   }
 })
 
-test('compactação soma só o resumo e não mexe nas barras', async ($, on) => {
-  preparar(on)
-  await iniciar($)
+test('compaction adds only the summary and leaves the bars alone', async ($, on) => {
+  setup(on)
+  await start($)
   await $.turn.start({ text: '', turnId: 't1' })
-  await passo($, 't1', 'a')
-  await passo($, 't1', 'a')
+  await step($, 't1', 'a')
+  await step($, 't1', 'a')
   await $.turn.complete({ turnId: 't1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
-  await turno($, 't2', 'b')
-  // /compact entre turnos: o fork do engine tem agentId mas não abre turno.
-  await passo($, 'fork', 'compactacao', 'fork-compactacao')
+  await turn($, 't2', 'b')
+  // /compact between turns: the engine's fork has an agentId but opens no turn.
+  await step($, 'fork', 'compaction', 'fork-compaction')
 
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
-  // Duas barras: t1 (2 × 2.500) e t2 (240.000, a maior).
+  // Two bars: t1 (2 × 2,500) and t2 (240,000, the largest).
   expect(await ui.find({ type: 'Text', text: '▁█  ' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /agente/ })).toBeUndefined()
   await ui.unmount()
-  // 5.000 + 240.000 + 5.000 do resumo; os 168k relidos do cache não entram.
-  expect(await faixa($)).toMatch(/250k tokens/)
+  // 5,000 + 240,000 + 5,000 of the summary; the 168k reread from cache stay out.
+  expect(await band($)).toMatch(/250k tokens/)
 })
 
-test('subagente mostra o próprio contexto e fica fora do resto da faixa', async ($, on) => {
-  preparar(on)
-  await iniciar($)
+test('a subagent shows its own context and stays out of the rest of the band', async ($, on) => {
+  setup(on)
+  await start($)
   await $.turn.start({ text: '', turnId: 't1' })
-  await passo($, 't1', 'a')
-  await contexto($, 97_000)
-  await $.turn.start({ text: 'tarefa', turnId: 'sub1', agentId: 'agente-1' })
+  await step($, 't1', 'a')
+  await context($, 97_000)
+  await $.turn.start({ text: 'task', turnId: 'sub1', agentId: 'agent-1' })
 
-  // Antes da primeira resposta o subagente ainda não aparece.
+  // Before its first response the subagent does not show yet.
   let ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: /agente/ })).toBeUndefined()
   await ui.unmount()
 
-  await passo($, 'sub1', 'a', 'agente-1')
+  await step($, 'sub1', 'a', 'agent-1')
   ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
-  // Entrada da última resposta do subagente: 1.000 + 8.000 + 1.000.
+  // Input of the subagent's last response: 1,000 + 8,000 + 1,000.
   expect(await ui.find({ type: 'Text', text: 'agente ' })).toBeDefined()
   expect((await ui.find({ type: 'Text', text: /^10k$/ }))?.props.color).toBe('green')
-  // O ctx segue o da thread principal.
+  // ctx stays the main thread's.
   expect(await ui.find({ type: 'Text', text: /^97k$/ })).toBeDefined()
   await ui.unmount()
 
-  await $.turn.start({ text: 'outra', turnId: 'sub2', agentId: 'agente-2' })
-  await passo($, 'sub2', 'b', 'agente-2')
+  await $.turn.start({ text: 'another', turnId: 'sub2', agentId: 'agent-2' })
+  await step($, 'sub2', 'b', 'agent-2')
   ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: '2 agentes, maior ' })).toBeDefined()
   expect((await ui.find({ type: 'Text', text: /^1,2M$/ }))?.props.color).toBe('red')
   await ui.unmount()
 
-  for (const [turnId, agentId] of [['sub1', 'agente-1'], ['sub2', 'agente-2']] as const) {
+  for (const [turnId, agentId] of [['sub1', 'agent-1'], ['sub2', 'agent-2']] as const) {
     await $.turn.complete({ turnId, answer: '', durationMs: 1, isAborted: false, reason: 'answer', agentId })
   }
   await $.turn.complete({ turnId: 't1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
 
   ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: /agente/ })).toBeUndefined()
-  // Uma barra só: os subagentes não abrem turno.
+  // A single bar: subagents open no turn.
   expect(await ui.find({ type: 'Text', text: '█  ' })).toBeDefined()
   await ui.unmount()
-  // Sessão e ↑↓ só da thread principal; o hoje soma os subagentes (2.500 + 2.500 + 240.000).
-  const texto = await faixa($)
-  expect(texto).toMatch(/2,5k tokens/)
-  expect(texto).toMatch(/↑ 2,0k {2}↓ 500/)
-  expect(texto).toMatch(/hoje 245k/)
+  // Session and ↑↓ only the main thread's; today adds the subagents (2,500 + 2,500 + 240,000).
+  const text = await band($)
+  expect(text).toMatch(/2,5k tokens/)
+  expect(text).toMatch(/↑ 2,0k {2}↓ 500/)
+  expect(text).toMatch(/hoje 245k/)
 })
 
-test('hoje soma as outras sessões, retoma a própria e poda dias velhos', async ($, on) => {
-  const mundo = preparar(on, {
+test("a subagent step racing its turn.start still counts as the subagent's", async ($, on) => {
+  setup(on)
+  await start($)
+  await $.turn.start({ text: '', turnId: 't1' })
+
+  // Neither awaited before the other: the queue orders the step after the start.
+  await Promise.all([
+    $.turn.start({ text: 'task', turnId: 'sub1', agentId: 'agent-1' }),
+    step($, 'sub1', 'b', 'agent-1'),
+  ])
+
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
+  expect(await ui.find({ type: 'Text', text: 'agente ' })).toBeDefined()
+  await ui.unmount()
+  const text = await band($)
+  // Out of the session (the bar is t1's, still empty), into today.
+  expect(text).toMatch(/▁ {2}0 tokens/)
+  expect(text).toMatch(/hoje 240k/)
+})
+
+test('today adds the other sessions, resumes its own and prunes old days', async ($, on) => {
+  const world = setup(on, {
     store: {
-      [`novos:${HOJE}:outra`]: 100_000,
-      [`novos:${HOJE}:sessao-a`]: 50_000,
-      'novos:2026-09-01:velha': 1,
+      [`novos:${TODAY}:other`]: 100_000,
+      [`novos:${TODAY}:session-a`]: 50_000,
+      'novos:2026-09-01:old': 1,
       'dia:2026-10-02': 0.93,
       'tokens:2026-10-05': 6_685_689,
-      ultimoRecap: { texto: 'x', em: AGORA },
+      ultimoRecap: { texto: 'x', em: NOW },
     },
   })
-  await iniciar($)
-  expect(mundo.store.has('novos:2026-09-01:velha')).toBe(false)
-  // Chaves que o mod não usa mais saem.
-  expect([...mundo.store.keys()].some(k => k.startsWith('dia:') || k.startsWith('tokens:'))).toBe(false)
-  expect(mundo.store.has('ultimoRecap')).toBe(false)
+  await start($)
+  expect(world.store.has('novos:2026-09-01:old')).toBe(false)
+  // Keys the mod no longer uses go away.
+  expect([...world.store.keys()].some(k => k.startsWith('dia:') || k.startsWith('tokens:'))).toBe(false)
+  expect(world.store.has('ultimoRecap')).toBe(false)
 
-  await turno($, 't1', 'a')
-  // Resume da sessao-a: continua dos 50.000 gravados, não começa do zero nem soma duas vezes.
-  expect(mundo.store.get(`novos:${HOJE}:sessao-a`)).toBe(52_500)
-  expect(mundo.store.get(`novos:${HOJE}:outra`)).toBe(100_000)
-  expect(await faixa($)).toMatch(/hoje 153k/)
+  await turn($, 't1', 'a')
+  // Resuming session-a: goes on from the 50,000 written, neither from zero nor adding twice.
+  expect(world.store.get(`novos:${TODAY}:session-a`)).toBe(52_500)
+  expect(world.store.get(`novos:${TODAY}:other`)).toBe(100_000)
+  expect(await band($)).toMatch(/hoje 153k/)
 })
 
-test('/clear zera a sessão e mantém o dia', async ($, on) => {
-  const mundo = preparar(on)
-  await iniciar($)
-  await turno($, 't1', 'a')
-  await $.session.end({ reason: 'clear', sessionId: 'sessao-a', resume: { id: 'sessao-a' } })
-  mundo.sessionId = 'sessao-b'
+test("past midnight today drops to 0 until the next count, then starts the new day's sum", async ($, on) => {
+  const world = setup(on)
+  await start($)
+  await turn($, 't1', 'a')
+  expect(await band($)).toMatch(/hoje 2,5k/)
 
-  let texto = await faixa($)
-  expect(texto).toMatch(/^0 tokens/)
-  expect(texto).toMatch(/hoje 2,5k/)
+  await world.clock.set(new Date(2026, 9, 6, 0, 5).getTime())
+  let text = await band($)
+  // The session's own count stays; yesterday's total is not today's.
+  expect(text).toMatch(/2,5k tokens/)
+  expect(text).toMatch(/hoje 0/)
 
-  await turno($, 't2', 'a')
-  texto = await faixa($)
-  expect(texto).toMatch(/2,5k tokens/)
-  expect(texto).toMatch(/hoje 5,0k/)
-  expect(mundo.store.get(`novos:${HOJE}:sessao-b`)).toBe(2500)
+  await turn($, 't2', 'a')
+  text = await band($)
+  expect(text).toMatch(/hoje 2,5k/)
+  expect(world.store.get('novos:2026-10-06:session-a')).toBe(2500)
 })
 
-test('limites aparecem desde o início e zeram quando a janela já virou', async ($, on) => {
-  preparar(on, {
+test('/clear resets the session and keeps the day', async ($, on) => {
+  const world = setup(on)
+  await start($)
+  await turn($, 't1', 'a')
+  await $.session.end({ reason: 'clear', sessionId: 'session-a', resume: { id: 'session-a' } })
+  world.sessionId = 'session-b'
+
+  let text = await band($)
+  expect(text).toMatch(/^0 tokens/)
+  expect(text).toMatch(/hoje 2,5k/)
+
+  await turn($, 't2', 'a')
+  text = await band($)
+  expect(text).toMatch(/2,5k tokens/)
+  expect(text).toMatch(/hoje 5,0k/)
+  expect(world.store.get(`novos:${TODAY}:session-b`)).toBe(2500)
+})
+
+test('limits show from the start and drop to 0 when the window already rolled over', async ($, on) => {
+  setup(on, {
     rateLimits: [
-      { kind: 'five_hour', percentUsed: 40, resetsAt: new Date(AGORA + 3_600_000).toISOString() },
-      { kind: 'seven_day', percentUsed: 90, resetsAt: new Date(AGORA - 60_000).toISOString() },
+      { kind: 'five_hour', percentUsed: 40, resetsAt: new Date(NOW + 3_600_000).toISOString() },
+      { kind: 'seven_day', percentUsed: 90, resetsAt: new Date(NOW - 60_000).toISOString() },
     ],
   })
-  await iniciar($)
+  await start($)
 
-  const texto = await faixa($)
-  expect(texto).toMatch(/5h 40%/)
-  expect(texto).toMatch(/7d 0%/)
+  const text = await band($)
+  expect(text).toMatch(/5h 40%/)
+  expect(text).toMatch(/7d 0%/)
 })
 
-test('sem nenhum dado ainda, a faixa não aparece', async ($, on) => {
-  // O desenho do próprio engine, que a faixa deixa passar quando não tem o que mostrar.
-  preparar(on, { abaixo: 'engine' })
-  await iniciar($)
+test('with no data yet, the band does not show', async ($, on) => {
+  // The engine's own drawing, which the band lets through when it has nothing to show.
+  setup(on, { below: 'engine' })
+  await start($)
 
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: /tokens/ })).toBeUndefined()
@@ -268,277 +306,321 @@ test('sem nenhum dado ainda, a faixa não aparece', async ($, on) => {
   await ui.unmount()
 })
 
-async function contexto($: Engine, tokens: number) {
+async function context($: Engine, tokens: number) {
   await $.session.measure({ context: { tokens, window: 200000 }, rateLimits: [], changed: ['context'] })
 }
 
-/** Aperta o botão da faixa, como o clique ou a tecla c. */
-async function apertar($: Engine) {
+/** Presses the band's button, as the click or the c key does. */
+async function press($: Engine) {
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
-  await ui.press({ key: 'compactar' })
+  await ui.press({ key: 'compact' })
   await ui.unmount()
 }
 
-test('indicador de contexto muda de cor em 140k e 170k', async ($, on) => {
-  preparar(on)
-  await iniciar($)
+function collectToasts(on: On): string[] {
+  const notices: string[] = []
+  on('ui.toast', (_$, e) => (notices.push(typeof e === 'string' ? e : JSON.stringify(e)), { value: undefined }))
 
-  for (const [tokens, cor, rotulo] of [[97_000, 'green', '97k'], [152_000, 'yellow', '152k'], [181_000, 'red', '181k']] as const) {
-    await contexto($, tokens)
+  return notices
+}
+
+test('the context indicator changes color at 140k and 170k', async ($, on) => {
+  setup(on)
+  await start($)
+
+  for (const [tokens, color, label] of [[97_000, 'green', '97k'], [152_000, 'yellow', '152k'], [181_000, 'red', '181k']] as const) {
+    await context($, tokens)
     const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
-    const valor = await ui.find({ type: 'Text', text: new RegExp(`^${rotulo}$`) })
-    expect(valor?.props.color).toBe(cor)
-    expect(await ui.find({ type: 'Button', key: 'compactar' })).toBeDefined()
+    const value = await ui.find({ type: 'Text', text: new RegExp(`^${label}$`) })
+    expect(value?.props.color).toBe(color)
+    expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
     await ui.unmount()
   }
 })
 
-test('compactar sem leituras pesando: resume com foco e o ctx cai para o que ficou', async ($, on) => {
-  preparar(on)
-  const pedidos: (string | undefined)[] = []
-  on('session.compact', (_$, e) => (pedidos.push(e.instructions), { messages: RESUMO, tokensBefore: 181_000, tokensAfter: 15_000 }))
-  await iniciar($)
-  await contexto($, 181_000)
+test('compacting with light reads: summarizes with focus and ctx drops to what is left', async ($, on) => {
+  setup(on)
+  const requests: (string | undefined)[] = []
+  on('session.compact', (_$, e) => (requests.push(e.instructions), { messages: SUMMARY, tokensBefore: 181_000, tokensAfter: 15_000 }))
+  await start($)
+  await context($, 181_000)
 
-  await apertar($)
+  await press($)
 
-  expect(pedidos).toHaveLength(1)
-  expect(pedidos[0]).toMatch(/pendências/)
+  expect(requests).toHaveLength(1)
+  expect(requests[0]).toMatch(/pendências/)
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect((await ui.find({ type: 'Text', text: /^15k$/ }))?.props.color).toBe('green')
   await ui.unmount()
 })
 
-test('compactação que falha avisa e não mexe no contexto', async ($, on) => {
-  preparar(on)
-  const avisos: string[] = []
-  // Sem hook do teste, o núcleo do kit rejeita a compactação (não tem a conversa): é o caminho de erro.
-  on('ui.toast', (_$, e) => (avisos.push(typeof e === 'string' ? e : JSON.stringify(e)), { value: undefined }))
-  await iniciar($)
-  await contexto($, 181_000)
+test('a failing compaction gives notice and leaves the context alone', async ($, on) => {
+  setup(on)
+  const notices = collectToasts(on)
+  // With no hook from the test, the kit's core rejects the compaction (it has no conversation): the error path.
+  await start($)
+  await context($, 181_000)
 
-  // O aviso de contexto alto veio antes do clique: o teste olha só o do botão.
-  avisos.splice(0)
-  await apertar($)
+  // The high-context notice came before the click: the test looks only at the button's.
+  notices.splice(0)
+  await press($)
 
-  expect(avisos).toHaveLength(1)
-  expect(avisos[0]).toMatch(/Não consegui compactar/)
+  expect(notices).toHaveLength(1)
+  expect(notices[0]).toMatch(/Não consegui compactar/)
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: '181k' })).toBeDefined()
   await ui.unmount()
 })
 
-test('botão some enquanto o modelo trabalha', async ($, on) => {
-  preparar(on)
-  await iniciar($)
-  await contexto($, 181_000)
+test('the button goes away while the model works', async ($, on) => {
+  setup(on)
+  await start($)
+  await context($, 181_000)
 
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND, props: { ...BAND.props, isWorking: true } })
-  expect(await ui.find({ type: 'Button', key: 'compactar' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: '181k' })).toBeDefined()
   await ui.unmount()
 })
 
-const RESUMO = [{ role: 'user', text: 'resumo da conversa', toolUses: [] }] as never
+const SUMMARY = [{ role: 'user', text: 'conversation summary', toolUses: [] }] as never
 
-/** Uma leitura de arquivo de ~100k tokens (400 mil caracteres), inteira ou já tirada pelo micro. */
-function comLeitura(texto = 'x'.repeat(400_000)) {
+/** A file read of ~100k tokens (400 thousand characters), whole or already removed by micro, after `chat` of plain talk. */
+function withRead(content = 'x'.repeat(400_000), chat = '') {
   return [
+    { role: 'user', text: chat, toolUses: [] },
     { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'r1', tool: 'Read', input: { file_path: '/a.ts' } }] },
-    { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'r1', text: texto, isError: false }] },
+    { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'r1', text: content, isError: false }] },
   ] as never[]
 }
-const TIRADA = '[file contents elided by compaction: /a.ts, 9000 lines. Read it again if needed.]'
+const ELIDED = '[file contents elided by compaction: /a.ts, 9000 lines. Read it again if needed.]'
 
-test('compactação troca o contexto pelo tamanho que ela deixou', async ($, on) => {
-  preparar(on)
-  on('session.compact', (_$, e) => ({ messages: RESUMO, ...(e.trigger === 'precompute' ? {} : { tokensBefore: 190_000, tokensAfter: 12_000 }) }))
-  await iniciar($)
-  await contexto($, 190_000)
+test('compaction swaps the context for the size it left', async ($, on) => {
+  setup(on)
+  on('session.compact', (_$, e) => ({ messages: SUMMARY, ...(e.trigger === 'precompute' ? {} : { tokensBefore: 190_000, tokensAfter: 12_000 }) }))
+  await start($)
+  await context($, 190_000)
 
-  // A pré-computação não instala nada: o contexto continua o mesmo.
-  await $.session.compact({ trigger: 'precompute', messages: RESUMO } as never)
-  const lido = async () => {
+  // Precompute installs nothing: the context stays the same.
+  await $.session.compact({ trigger: 'precompute', messages: SUMMARY } as never)
+  const shown = async () => {
     const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
-    const valor = await ui.find({ type: 'Text', text: /^\d+(,\d)?k$/ })
+    const value = await ui.find({ type: 'Text', text: /^\d+(,\d)?k$/ })
     await ui.unmount()
 
-    return valor?.text
+    return value?.text
   }
-  expect(await lido()).toBe('190k')
+  expect(await shown()).toBe('190k')
 
-  await $.session.compact({ trigger: 'auto', messages: RESUMO } as never)
-  expect(await lido()).toBe('12k')
+  await $.session.compact({ trigger: 'auto', messages: SUMMARY } as never)
+  expect(await shown()).toBe('12k')
 })
 
-test('limiares do contexto saem da janela de compactação', async ($, on) => {
-  preparar(on, { janela: 120_000 })
-  await iniciar($)
+test('the context thresholds come from the compaction window', async ($, on) => {
+  setup(on, { window: 120_000 })
+  await start($)
 
-  // Janela de 120k: amarelo a partir de 60k, vermelho a partir de 90k.
-  for (const [tokens, cor, rotulo] of [[50_000, 'green', '50k'], [70_000, 'yellow', '70k'], [95_000, 'red', '95k']] as const) {
-    await contexto($, tokens)
+  // 120k window: yellow from 60k, red from 90k.
+  for (const [tokens, color, label] of [[50_000, 'green', '50k'], [70_000, 'yellow', '70k'], [95_000, 'red', '95k']] as const) {
+    await context($, tokens)
     const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
-    expect((await ui.find({ type: 'Text', text: new RegExp(`^${rotulo}$`) }))?.props.color).toBe(cor)
+    expect((await ui.find({ type: 'Text', text: new RegExp(`^${label}$`) }))?.props.color).toBe(color)
     expect(await ui.find({ type: 'Text', text: '/120k' })).toBeDefined()
     await ui.unmount()
   }
 })
 
-test('avisa uma vez ao entrar no vermelho e de novo depois que o contexto cai', async ($, on) => {
-  preparar(on)
-  const avisos: string[] = []
-  on('ui.toast', (_$, e) => (avisos.push(typeof e === 'string' ? e : JSON.stringify(e)), { value: undefined }))
-  await iniciar($)
+test('warns once on entering red and again after the context drops', async ($, on) => {
+  setup(on)
+  const notices = collectToasts(on)
+  await start($)
 
-  await contexto($, 150_000)
-  expect(avisos).toHaveLength(0)
-  await contexto($, 172_000)
-  await contexto($, 185_000)
-  expect(avisos).toHaveLength(1)
-  expect(avisos[0]).toMatch(/172k de 200k: .*resume a conversa/)
+  await context($, 150_000)
+  expect(notices).toHaveLength(0)
+  await context($, 172_000)
+  await context($, 185_000)
+  expect(notices).toHaveLength(1)
+  expect(notices[0]).toMatch(/172k de 200k: .*resume a conversa/)
 
-  // Depois de compactar, o contexto cai; subir de novo avisa outra vez.
-  await contexto($, 20_000)
-  await contexto($, 175_000)
-  expect(avisos).toHaveLength(2)
+  // After compacting, the context drops; going up again warns once more.
+  await context($, 20_000)
+  await context($, 175_000)
+  expect(notices).toHaveLength(2)
 })
 
-test('compactar com leituras pesando: vai de micro, como /compact digitado', async ($, on) => {
-  preparar(on, { mensagens: comLeitura() })
-  const comandos: string[] = []
-  on('command.run', (_$, e) => (comandos.push(`/${e.command} ${e.args}`), { text: '' }))
-  const resumos: unknown[] = []
-  on('session.compact', (_$, e) => (resumos.push(e), { messages: RESUMO, tokensAfter: 15_000 }))
-  await iniciar($)
-  // ~100k de leitura em 181k de contexto: passa dos 40%.
-  await contexto($, 181_000)
+test('compacting with heavy reads: goes micro, as a typed /compact', async ($, on) => {
+  setup(on, { messages: withRead() })
+  const commands: string[] = []
+  on('command.run', (_$, e) => (commands.push(`/${e.command} ${e.args}`), { text: '' }))
+  const summaries: unknown[] = []
+  on('session.compact', (_$, e) => (summaries.push(e), { messages: SUMMARY, tokensAfter: 15_000 }))
+  await start($)
+  await context($, 181_000)
 
-  await apertar($)
+  await press($)
 
-  expect(comandos).toEqual(['/compact micro'])
-  expect(resumos).toHaveLength(0)
+  expect(commands).toEqual(['/compact micro'])
+  expect(summaries).toHaveLength(0)
 })
 
-test('aviso do vermelho diz que o botão vai de micro e quanto tira', async ($, on) => {
-  preparar(on, { mensagens: comLeitura() })
-  const avisos: string[] = []
-  on('ui.toast', (_$, e) => (avisos.push(typeof e === 'string' ? e : JSON.stringify(e)), { value: undefined }))
-  await iniciar($)
+test('reads under 40% of the conversation go to the summary', async ($, on) => {
+  // 400k characters of read against 700k of plain talk: ~36%.
+  setup(on, { messages: withRead(undefined, 'y'.repeat(700_000)) })
+  const commands: string[] = []
+  on('command.run', (_$, e) => (commands.push(`/${e.command} ${e.args}`), { text: '' }))
+  const requests: (string | undefined)[] = []
+  on('session.compact', (_$, e) => (requests.push(e.instructions), { messages: SUMMARY, tokensAfter: 15_000 }))
+  await start($)
+  await context($, 181_000)
 
-  await contexto($, 181_000)
+  await press($)
 
-  expect(avisos).toHaveLength(1)
-  expect(avisos[0]).toMatch(/tira ~100k de leituras de arquivo \(micro\)/)
+  expect(commands).toHaveLength(0)
+  expect(requests).toHaveLength(1)
 })
 
-test('micro não informa o tamanho: o ctx desconta o que saiu das mensagens', async ($, on) => {
-  preparar(on)
-  on('session.compact', () => ({ messages: comLeitura(TIRADA) }))
-  await iniciar($)
-  await contexto($, 181_000)
+test("the red notice says the button goes micro and the reads' share", async ($, on) => {
+  // 400k characters of read against 400k of plain talk: half the conversation.
+  setup(on, { messages: withRead(undefined, 'y'.repeat(400_000)) })
+  const notices = collectToasts(on)
+  await start($)
 
-  await $.session.compact({ trigger: 'manual', instructions: 'micro', messages: comLeitura() } as never)
+  await context($, 181_000)
 
-  // 181k menos os ~100k da leitura (o marcador que fica é desprezível).
+  expect(notices).toHaveLength(1)
+  expect(notices[0]).toMatch(/tira as leituras de arquivo, ~50% da conversa \(micro\)/)
+})
+
+test('micro reports no size: ctx subtracts what left the messages', async ($, on) => {
+  setup(on)
+  on('session.compact', () => ({ messages: withRead(ELIDED) }))
+  await start($)
+  await context($, 181_000)
+
+  await $.session.compact({ trigger: 'manual', instructions: 'micro', messages: withRead() } as never)
+
+  // 181k minus the ~100k of the read (the marker left behind is negligible).
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: /^81k$/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('micro sem o plugin vira resumo do núcleo e avisa', async ($, on) => {
-  preparar(on)
-  const avisos: string[] = []
-  on('ui.toast', (_$, e) => (avisos.push(typeof e === 'string' ? e : JSON.stringify(e)), { value: undefined }))
-  on('session.compact', () => ({ messages: RESUMO, tokensBefore: 181_000, tokensAfter: 12_000 }))
-  await iniciar($)
-  await contexto($, 150_000)
+test('micro without the plugin becomes a core summary and gives notice', async ($, on) => {
+  setup(on)
+  const notices = collectToasts(on)
+  on('session.compact', () => ({ messages: SUMMARY, tokensBefore: 181_000, tokensAfter: 12_000 }))
+  await start($)
+  await context($, 150_000)
 
-  await $.session.compact({ trigger: 'manual', instructions: 'micro', messages: comLeitura() } as never)
+  await $.session.compact({ trigger: 'manual', instructions: 'micro', messages: withRead() } as never)
 
-  expect(avisos).toHaveLength(1)
-  expect(avisos[0]).toMatch(/micro-compaction não está ativo/)
+  expect(notices).toHaveLength(1)
+  expect(notices[0]).toMatch(/micro-compaction não está ativo/)
 })
 
-test('mantém o que outro mod desenha abaixo da faixa', async ($, on) => {
-  preparar(on, { abaixo: 'aviso de outro mod' })
-  await iniciar($)
-  await turno($, 't1', 'a')
+test("a core summary that only reports its request's usage still counts as one", async ($, on) => {
+  setup(on)
+  const notices = collectToasts(on)
+  on('session.compact', () => ({ messages: SUMMARY, usage: { ...USAGES.compaction!, model: 'compaction' } }))
+  await start($)
+  await context($, 150_000)
+
+  await $.session.compact({ trigger: 'manual', instructions: 'micro', messages: withRead() } as never)
+
+  expect(notices).toHaveLength(1)
+  expect(notices[0]).toMatch(/micro-compaction não está ativo/)
+})
+
+test('micro done by the plugin gives no notice', async ($, on) => {
+  setup(on)
+  const notices = collectToasts(on)
+  on('session.compact', () => ({ messages: withRead(ELIDED) }))
+  await start($)
+  await context($, 150_000)
+
+  await $.session.compact({ trigger: 'manual', instructions: 'micro', messages: withRead() } as never)
+
+  expect(notices).toHaveLength(0)
+})
+
+test('keeps what another mod draws below the band', async ($, on) => {
+  setup(on, { below: 'another mod notice' })
+  await start($)
+  await turn($, 't1', 'a')
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'cc-cost', surface, ...BAND })
     expect((await ui.find({ type: 'Text', text: /tokens/ }))?.text ?? '').toMatch(/tokens/)
-    expect((await ui.find({ type: 'Text', text: /aviso de outro mod/ }))?.text).toBe('aviso de outro mod')
+    expect((await ui.find({ type: 'Text', text: /another mod notice/ }))?.text).toBe('another mod notice')
     await ui.unmount()
   }
 })
 
-test('com a cadeia abaixo vazia, a faixa aparece sozinha', async ($, on) => {
-  preparar(on)
-  await iniciar($)
-  await turno($, 't1', 'a')
+test('with an empty chain below, the band shows alone', async ($, on) => {
+  setup(on)
+  await start($)
+  await turn($, 't1', 'a')
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'cc-cost', surface, ...BAND })
     expect((await ui.find({ type: 'Text', text: /tokens/ }))?.text ?? '').toMatch(/tokens/)
-    expect(await ui.find({ type: 'Text', text: /aviso de outro mod/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /another mod notice/ })).toBeUndefined()
     await ui.unmount()
   }
 })
 
-test('com pesquisa aberta, só passa adiante', async ($, on) => {
-  preparar(on, { abaixo: 'aviso de outro mod' })
-  await iniciar($)
-  await turno($, 't1', 'a')
+test('with a survey open, it only passes along', async ($, on) => {
+  setup(on, { below: 'another mod notice' })
+  await start($)
+  await turn($, 't1', 'a')
 
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND, props: { ...BAND.props, hasSurvey: true } })
   expect(await ui.find({ type: 'Text', text: /tokens/ })).toBeUndefined()
-  expect((await ui.find({ type: 'Text', text: /aviso de outro mod/ }))?.text).toBe('aviso de outro mod')
+  expect((await ui.find({ type: 'Text', text: /another mod notice/ }))?.text).toBe('another mod notice')
   await ui.unmount()
 })
 
-test('sem locale português ou espanhol, a faixa sai em inglês', async ($, on) => {
-  preparar(on, { env: { LANG: 'en_US.UTF-8' } })
-  await iniciar($)
-  await turno($, 't1', 'a')
+test('with no Portuguese or Spanish locale, the band comes out in English', async ($, on) => {
+  setup(on, { env: { LANG: 'en_US.UTF-8' } })
+  await start($)
+  await turn($, 't1', 'a')
   await $.session.measure({
     context: { window: 200000 },
     rateLimits: [{ kind: 'spend_limit', percentUsed: 10 }],
     changed: ['rateLimits'],
   })
 
-  const texto = await faixa($)
-  expect(texto).toMatch(/2\.5k tokens/)
-  expect(texto).toMatch(/today 2\.5k/)
-  expect(texto).toMatch(/limit 10%/)
+  const text = await band($)
+  expect(text).toMatch(/2\.5k tokens/)
+  expect(text).toMatch(/today 2\.5k/)
+  expect(text).toMatch(/limit 10%/)
 })
 
-test('locale espanhol vira a faixa em espanhol', async ($, on) => {
-  preparar(on, { env: { LC_ALL: 'es_AR.UTF-8', LANG: 'en_US.UTF-8' } })
-  await iniciar($)
-  await turno($, 't1', 'a')
+test('a Spanish locale turns the band Spanish', async ($, on) => {
+  setup(on, { env: { LC_ALL: 'es_AR.UTF-8', LANG: 'en_US.UTF-8' } })
+  await start($)
+  await turn($, 't1', 'a')
 
-  expect(await faixa($)).toMatch(/hoy 2,5k/)
+  expect(await band($)).toMatch(/hoy 2,5k/)
 })
 
-test('a opção language vence o locale', { options: { language: 'en' } }, async ($, on) => {
-  preparar(on)
-  await iniciar($)
-  await turno($, 't1', 'a')
+test('the language option beats the locale', { options: { language: 'en' } }, async ($, on) => {
+  setup(on)
+  await start($)
+  await turn($, 't1', 'a')
 
-  expect(await faixa($)).toMatch(/today 2\.5k/)
+  expect(await band($)).toMatch(/today 2\.5k/)
 })
 
-test('store que falha avisa uma vez e não derruba o turno', async ($, on) => {
-  preparar(on, { storeQuebrado: true })
-  const avisos: string[] = []
-  on('ui.toast', (_$, e) => (avisos.push(typeof e === 'string' ? e : JSON.stringify(e)), { value: undefined }))
-  await iniciar($)
+test('a failing store warns once and does not take down the turn', async ($, on) => {
+  setup(on, { brokenStore: true })
+  const notices = collectToasts(on)
+  await start($)
 
-  // Os dois turnos terminam: a falha do mod não chega à resposta.
-  await turno($, 't1', 'a')
-  await turno($, 't2', 'a')
+  // Both turns finish: the mod's failure does not reach the answer.
+  await turn($, 't1', 'a')
+  await turn($, 't2', 'a')
 
-  expect(avisos).toHaveLength(1)
-  expect(avisos[0]).toMatch(/a contagem falhou/)
+  expect(notices).toHaveLength(1)
+  expect(notices[0]).toMatch(/a contagem falhou/)
 })

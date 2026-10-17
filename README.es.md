@@ -74,14 +74,14 @@ El botón **compact** elige lo que cuesta menos:
 
 ```mermaid
 flowchart LR
-    A([compact · c]) --> B{¿Lecturas de archivos<br>≥ 40% del contexto?}
+    A([compact · c]) --> B{¿Lecturas de archivos<br>≥ 40% de la conversación?}
     B -- sí --> C["/compact micro<br><sub>descarta lecturas viejas</sub>"]
     B -- no --> D["/compact<br><sub>resumen enfocado</sub>"]
 ```
 
 > [!NOTE]
 > El modo `micro` necesita el plugin micro-compaction. Sin él, el botón usa el `/compact` nativo y lo avisa.
-> Cuando el contexto se pone 🔴, un toast indica qué modo usará el botón y cuánto libera.
+> Cuando el contexto se pone 🔴, un toast indica qué modo usará el botón y, en micro, qué parte de la conversación son lecturas.
 
 ---
 

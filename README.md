@@ -74,14 +74,14 @@ The **compact** button picks what costs less:
 
 ```mermaid
 flowchart LR
-    A([compact · c]) --> B{File reads ≥ 40%<br>of the context?}
+    A([compact · c]) --> B{File reads ≥ 40%<br>of the conversation?}
     B -- yes --> C["/compact micro<br><sub>drops stale reads</sub>"]
     B -- no --> D["/compact<br><sub>focused summary</sub>"]
 ```
 
 > [!NOTE]
 > `micro` needs the micro-compaction plugin. Without it, the button falls back to the native `/compact` and tells you so.
-> When the context turns 🔴, a toast says which mode the button will use and how much it frees.
+> When the context turns 🔴, a toast says which mode the button will use and, for micro, how much of the conversation is file reads.
 
 ---
 

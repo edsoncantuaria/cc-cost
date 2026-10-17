@@ -1,32 +1,34 @@
-export type Tokens = { entrada: number; saida: number; cacheLido: number; cacheEscrito: number }
+export type Tokens = { input: number; output: number; cacheRead: number; cacheWrite: number }
 
-/** micro: tira as leituras de arquivo (plugin micro-compaction); resumo: o /compact nativo. */
-export type Modo = 'micro' | 'resumo'
+/** micro: drops the file reads (micro-compaction plugin); summary: the native /compact. */
+export type Mode = 'micro' | 'summary'
 
-export type Limite = { kind: string; percentUsed: number; resetsAt?: string }
+export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
 
-export type Gasto = {
-  sessao: Tokens
-  /** Tokens novos do dia, somando todas as sessões (chaves `novos:<dia>:*` do $.store). */
-  hoje: number
-  /** Chave do $.store desta sessão no dia e o quanto ela já gravou ali. */
-  proprio: { chave: string; n: number }
-  /** Tokens novos por turno da thread principal, os mais recentes, para a sparkline. */
-  turnos: number[]
-  /** Se um turno da thread principal está rodando: só então o uso entra na última barra. */
-  emTurno: boolean
-  limites: Limite[]
-  /** Tokens do contexto atual (entrada da última resposta); null antes da primeira e depois do /clear. */
-  contexto: number | null
-  /** Janela de compactação (autoCompactWindow), de onde saem os limiares do ctx; null até a primeira leitura. */
-  janela: number | null
-  /** Contexto de cada subagente rodando (entrada da última resposta dele), 0 antes da primeira; o ctx é só da thread principal. */
-  agentes?: Record<string, number>
+export type Spend = {
+  session: Tokens
+  /** New tokens of the day, summed over every session (the `novos:<day>:*` keys in $.store). */
+  today: number
+  /** Local day (YYYY-MM-DD) `today` was summed for: past it, the band shows 0 until the next count. */
+  day: string
+  /** This session's $.store key for the day and how much it has written there. */
+  own: { key: string; n: number }
+  /** New tokens per main-thread turn, the most recent ones, for the sparkline. */
+  turns: number[]
+  /** Whether a main-thread turn is running: only then does usage go into the last bar. */
+  inTurn: boolean
+  limits: Limit[]
+  /** Tokens of the current context (input of the last response); null before the first one and after /clear. */
+  context: number | null
+  /** Compaction window (autoCompactWindow) the ctx thresholds come from; null until the first reading. */
+  window: number | null
+  /** Context of each running subagent (input of its last response), 0 before the first; ctx is the main thread's only. */
+  agents?: Record<string, number>
 }
 
 declare module 'claude-code' {
   interface PluginState {
-    /** `compactando`: qual compactação o botão está rodando; null fora dela. */
-    'cc-cost': { tokens: Gasto | null; compactando: Modo | null }
+    /** `compacting`: which compaction the button is running; null outside one. */
+    'cc-cost': { spend: Spend | null; compacting: Mode | null }
   }
 }
