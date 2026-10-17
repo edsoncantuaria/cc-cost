@@ -441,3 +441,53 @@ test('micro sem o plugin vira resumo do núcleo e avisa', async ($, on) => {
   expect(avisos).toHaveLength(1)
   expect(avisos[0]).toMatch(/micro-compaction não está ativo/)
 })
+
+// O que outro mod desenha depois na cadeia do AbovePrompt.
+function abaixo(on: On, texto: string | null) {
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    if (texto === null) return null as never
+    const { Text } = $.ui.resolve(e)
+
+    return h(Text, { key: 'outro-mod' }, texto) as never
+  })
+}
+
+test('mantém o que outro mod desenha abaixo da faixa', async ($, on) => {
+  preparar(on)
+  abaixo(on, 'aviso de outro mod')
+  await iniciar($)
+  await turno($, 't1', 'a')
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'cc-cost', surface, ...BAND })
+    expect((await ui.find({ type: 'Text', text: /tokens/ }))?.text ?? '').toMatch(/tokens/)
+    expect((await ui.find({ key: 'outro-mod' }))?.text).toBe('aviso de outro mod')
+    await ui.unmount()
+  }
+})
+
+test('com a cadeia abaixo vazia, a faixa aparece sozinha', async ($, on) => {
+  preparar(on)
+  abaixo(on, null)
+  await iniciar($)
+  await turno($, 't1', 'a')
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'cc-cost', surface, ...BAND })
+    expect((await ui.find({ type: 'Text', text: /tokens/ }))?.text ?? '').toMatch(/tokens/)
+    expect(await ui.find({ key: 'outro-mod' })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+test('com pesquisa aberta, só passa adiante', async ($, on) => {
+  preparar(on)
+  abaixo(on, 'aviso de outro mod')
+  await iniciar($)
+  await turno($, 't1', 'a')
+
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND, props: { ...BAND.props, hasSurvey: true } })
+  expect(await ui.find({ type: 'Text', text: /tokens/ })).toBeUndefined()
+  expect((await ui.find({ key: 'outro-mod' }))?.text).toBe('aviso de outro mod')
+  await ui.unmount()
+})

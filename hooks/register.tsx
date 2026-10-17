@@ -377,7 +377,7 @@ export const register: Register = on => {
     const agentes = Object.values(g.agentes ?? {}).filter(n => n > 0)
     const maior = Math.max(0, ...agentes)
 
-    return (
+    const faixa = (
       <Box paddingX={1} flexDirection="row">
         <Text wrap="truncate-end">
           {g.turnos.length > 0 && <Text color="cyan">{sparkline(g.turnos)}  </Text>}
@@ -436,6 +436,15 @@ export const register: Register = on => {
             onPress={() => compactar($)}
           />
         )}
+      </Box>
+    )
+    // Compõe com quem vem depois na cadeia: o aviso ou os controles de outro mod não podem sumir.
+    const abaixo = await next(e)
+
+    return (
+      <Box flexDirection="column">
+        {faixa}
+        {abaixo}
       </Box>
     )
   })
