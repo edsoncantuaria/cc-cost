@@ -1,0 +1,5 @@
+{
+  "name": "cc-cost",
+  "owner": { "name": "edsoncantuaria" },
+  "plugins": [{ "name": "cc-cost", "source": "./" }]
+}

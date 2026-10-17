@@ -25,11 +25,19 @@ O ccusage estima o custo de API em dólar a partir dos logs passados. Na assinat
 - Opcional: o plugin micro-compaction para o modo `micro`.
 
 ## Instalação
-Copie a pasta para `~/.claude/mods/` (só escopo de usuário):
+No prompt de uma sessão do Claude Code:
+```
+/plugin install cc-cost --marketplace edsoncantuaria/cc-cost
+```
+Responda `y` para adicionar o marketplace e escolha o escopo.
+
+### A partir de um clone local (desenvolvimento)
 ```bash
 git clone https://github.com/edsoncantuaria/cc-cost ~/.claude/mods/cc-cost
 claude plugin validate ~/.claude/mods/cc-cost
+claude --plugin-dir ~/.claude/mods/cc-cost
 ```
+Para carregar em toda sessão, defina `CLAUDE_CODE_PLUGIN_DIRS` com a pasta no bloco `env` de `~/.claude/settings.json` e reinicie o Claude Code. Só copiar a pasta (sem um desses) não carrega o mod.
 
 ## Testes
 ```bash

@@ -25,11 +25,19 @@ ccusage estimates API cost in dollars from past logs. On a Pro/Max subscription 
 - Optional: the micro-compaction plugin for the `micro` compaction mode.
 
 ## Install
-Copy the folder into `~/.claude/mods/` (user scope only):
+At the prompt of a Claude Code session:
+```
+/plugin install cc-cost --marketplace edsoncantuaria/cc-cost
+```
+Answer `y` to add the marketplace, then pick a scope.
+
+### From a local clone (development)
 ```bash
 git clone https://github.com/edsoncantuaria/cc-cost ~/.claude/mods/cc-cost
 claude plugin validate ~/.claude/mods/cc-cost
+claude --plugin-dir ~/.claude/mods/cc-cost
 ```
+To load it in every session, set `CLAUDE_CODE_PLUGIN_DIRS` to the folder in the `env` block of `~/.claude/settings.json` and restart Claude Code. A folder alone (without one of these) is not loaded.
 
 ## Test
 ```bash
