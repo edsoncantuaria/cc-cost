@@ -243,12 +243,8 @@ test('limites aparecem desde o início e zeram quando a janela já virou', async
 })
 
 test('sem nenhum dado ainda, a faixa não aparece', async ($, on) => {
-  preparar(on)
   // O desenho do próprio engine, que a faixa deixa passar quando não tem o que mostrar.
-  on('ui.render', ($, e) => {
-    const { Text } = $.ui.resolve(e)
-    return h(Text, {}, 'engine') as RenderElement
-  })
+  preparar(on, { abaixo: 'engine' })
   await iniciar($)
 
   const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
