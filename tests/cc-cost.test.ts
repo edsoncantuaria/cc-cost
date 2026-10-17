@@ -361,6 +361,20 @@ test('compacting with light reads: summarizes with focus and ctx drops to what i
   await ui.unmount()
 })
 
+test('two presses in a row compact only once', async ($, on) => {
+  setup(on)
+  const requests: (string | undefined)[] = []
+  on('session.compact', (_$, e) => (requests.push(e.instructions), { messages: SUMMARY, tokensBefore: 181_000, tokensAfter: 15_000 }))
+  await start($)
+  await context($, 181_000)
+
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
+  await Promise.all([ui.press({ key: 'compact' }), ui.press({ key: 'compact' })])
+  await ui.unmount()
+
+  expect(requests).toHaveLength(1)
+})
+
 test('a failing compaction gives notice and leaves the context alone', async ($, on) => {
   setup(on)
   const notices = collectToasts(on)
@@ -433,6 +447,19 @@ test('the context thresholds come from the compaction window', async ($, on) => 
     const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
     expect((await ui.find({ type: 'Text', text: new RegExp(`^${label}$`) }))?.props.color).toBe(color)
     expect(await ui.find({ type: 'Text', text: '/120k' })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('on a large window the headroom grows with it', async ($, on) => {
+  setup(on, { window: 1_000_000 })
+  await start($)
+
+  // 1M window: 15% and 7.5% of headroom, yellow from 850k, red from 925k.
+  for (const [tokens, color, label] of [[840_000, 'green', '840k'], [880_000, 'yellow', '880k'], [930_000, 'red', '930k']] as const) {
+    await $.session.measure({ context: { tokens, window: 1_000_000 }, rateLimits: [], changed: ['context'] })
+    const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
+    expect((await ui.find({ type: 'Text', text: new RegExp(`^${label}$`) }))?.props.color).toBe(color)
     await ui.unmount()
   }
 })

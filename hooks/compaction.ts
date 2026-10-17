@@ -61,11 +61,17 @@ function mode(share: number): Mode {
  * session.compact hook does not run on the call the mod makes itself.
  */
 export async function compactNow($: EngineInterface, rt: Runtime) {
-  if ((await readCompacting($)) !== null) return
   const t = await texts($, rt)
+  let chosen = null as Mode | null
   try {
-    const chosen = mode(readShare(await $.session.messages()))
-    await updateCompacting($, () => chosen)
+    // Checked and claimed inside the queue: two presses in a row see each other's claim, and only the first compacts.
+    await rt.enqueue(async () => {
+      if ((await readCompacting($)) !== null) return
+      const picked = mode(readShare(await $.session.messages()))
+      await updateCompacting($, () => picked)
+      chosen = picked
+    })
+    if (chosen === null) return
     if (chosen === 'micro') {
       await $.command.run(MICRO.command)
       return
@@ -78,7 +84,7 @@ export async function compactNow($: EngineInterface, rt: Runtime) {
   } catch (error) {
     $.ui.toast(t.compactFailed(message(error)))
   } finally {
-    await updateCompacting($, () => null)
+    if (chosen !== null) await updateCompacting($, () => null)
   }
 }
 

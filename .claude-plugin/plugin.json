@@ -1,6 +1,6 @@
 {
   "name": "cc-cost",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Minimal band above the prompt with session and daily tokens, context and usage limits",
   "author": {
     "name": "edsoncantuaria",

@@ -2,7 +2,7 @@
 
 # 💸 cc-cost
 
-### What your Claude Code session is *really* spending — live, right above the prompt.
+### What your Claude Code session is using — live, right above the prompt.
 
 Tokens, context and your subscription's **5h / 7d windows** — not API dollars.
 
@@ -42,7 +42,7 @@ At the prompt of a Claude Code session:
 
 | | Segment | Meaning |
 | :-: | --- | --- |
-| 🧮 | `19k tokens` | **New tokens** in the session: input + cache writes + output |
+| 🧮 | `19k tokens` | **New tokens** in the session: input + cache writes + output. A volume, not your quota: each kind weighs differently in the windows, so the `5h` / `7d` % is what you actually spend |
 | ↕️ | `↑ 19k  ↓ 30` | Input / output split |
 | ♻️ | `cache 83%` | Share of input served from cache reads — left out of the total, since they resend the same context every request |
 | 📅 | `today 156k` | **Today's total** across every session, kept locally for 7 days |

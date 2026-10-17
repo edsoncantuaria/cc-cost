@@ -6,9 +6,12 @@ import { EMPTY, readSpend, updateSpend } from './state'
 export const BARS = 12
 const DAYS_KEPT = 7
 
-// Headroom to the compaction window: red leaves ~30k to compact before autocompact.
+// Headroom to the compaction window: red leaves ~30k to compact before autocompact. On large windows a
+// fixed headroom would turn yellow only when nearly full, so the headroom grows with the window.
 const WARN_HEADROOM = 60_000
 const SWITCH_HEADROOM = 30_000
+const WARN_SHARE = 0.15
+const SWITCH_SHARE = 0.075
 // Window used for the thresholds until the engine's first reading: the default of 200k models.
 const DEFAULT_WINDOW = 200_000
 // Daily counters live under `novos:<day>:<sessionId>`; the prefix predates the English code and stays so stored totals survive.
@@ -32,7 +35,10 @@ export function fresh(t: Tokens): number {
 export function thresholds(window: number | null): { warn: number; switch: number } {
   const total = window ?? DEFAULT_WINDOW
 
-  return { warn: total - WARN_HEADROOM, switch: total - SWITCH_HEADROOM }
+  return {
+    warn: total - Math.max(WARN_HEADROOM, total * WARN_SHARE),
+    switch: total - Math.max(SWITCH_HEADROOM, total * SWITCH_SHARE),
+  }
 }
 
 /** The compaction window (autoCompactWindow), not the model's; the `summary` breakdown is estimated locally, with no request. */
@@ -66,12 +72,10 @@ export function limits(windows: readonly SessionRateLimit[]): Limit[] {
  */
 export async function daySum($: EngineInterface, today: string, own: Spend['own']): Promise<number> {
   const prefix = `${DAY_PREFIX}${today}:`
-  let sum = own.key.startsWith(prefix) ? own.n : 0
-  for (const key of await $.store.keys()) {
-    if (key.startsWith(prefix) && key !== own.key) sum += Number((await $.store.get(key)) ?? 0)
-  }
+  const others = (await $.store.keys()).filter(key => key.startsWith(prefix) && key !== own.key)
+  const values = await Promise.all(others.map(key => $.store.get(key)))
 
-  return sum
+  return values.reduce<number>((sum, v) => sum + Number(v ?? 0), own.key.startsWith(prefix) ? own.n : 0)
 }
 
 export async function prune($: EngineInterface, now: number) {
