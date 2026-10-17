@@ -1,6 +1,20 @@
 {
   "name": "cc-cost",
-  "version": "0.2.1",
-  "description": "Faixa minimalista acima do prompt com os tokens da sessão, do dia e os limites de uso",
-  "types": "./types/index.d.ts"
+  "version": "0.3.0",
+  "description": "Minimal band above the prompt with session and daily tokens, context and usage limits",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "Language of the band and its notices. auto follows the system locale (LC_ALL, LC_MESSAGES, LANG): Portuguese, Spanish, or English for anything else.",
+      "default": "auto",
+      "options": [
+        "auto",
+        "en",
+        "pt-BR",
+        "es"
+      ]
+    }
+  }
 }

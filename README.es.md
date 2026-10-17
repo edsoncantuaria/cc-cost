@@ -45,15 +45,12 @@ En el prompt de una sesión de Claude Code:
 | 🧮 | `19k tokens` | **Tokens nuevos** de la sesión: entrada + escritura de caché + salida |
 | ↕️ | `↑ 19k  ↓ 30` | División entre entrada y salida |
 | ♻️ | `cache 83%` | Parte de la entrada servida por lectura de caché — queda fuera del total, ya que reenvía el mismo contexto en cada petición |
-| 📅 | `hoje 156k` | **Total del día** sumando todas las sesiones, guardado localmente por 7 días |
+| 📅 | `hoy 156k` | **Total del día** sumando todas las sesiones, guardado localmente por 7 días |
 | ⏱️ | `5h 9%  7d 10%` | Ventanas de uso de la suscripción (y límite de gasto, si lo hay) |
 | 🧠 | `ctx 111k/1,0M` | Contexto actual frente a la ventana del autocompact |
 | 📈 | `▁▃▅█` | Sparkline de tokens nuevos por turno |
 | 🗜️ | `[ compact ]` | Compactación con una tecla (`c`), eligiendo el modo más barato |
 | 🤖 | subagentes | Cuántos corren y el mayor contexto entre ellos; sus tokens cuentan en el día, no en la sesión |
-
-> [!NOTE]
-> La barra muestra algunas etiquetas en portugués (`hoje` = hoy).
 
 ### 🚦 Colores
 
@@ -62,6 +59,12 @@ En el prompt de una sesión de Claude Code:
 | 🟢 | tranquilo | mucho espacio |
 | 🟡 | subiendo — no lo pierdas de vista | cerca de la ventana de compactación |
 | 🔴 | cerca del límite | compacta ya, antes del autocompact |
+
+---
+
+## 🌐 Idioma
+
+La barra y sus avisos siguen el locale del sistema (`LC_ALL`, `LC_MESSAGES`, `LANG`): portugués, español o inglés para el resto. Para fijar uno, ajusta `cc-cost.language` en `/config` a `en`, `pt-BR` o `es` (`auto` es el valor por defecto).
 
 ---
 

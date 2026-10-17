@@ -3,7 +3,7 @@ export type Tokens = { entrada: number; saida: number; cacheLido: number; cacheE
 /** micro: tira as leituras de arquivo (plugin micro-compaction); resumo: o /compact nativo. */
 export type Modo = 'micro' | 'resumo'
 
-export type Limite ={ kind: string; percentUsed: number; resetsAt?: string }
+export type Limite = { kind: string; percentUsed: number; resetsAt?: string }
 
 export type Gasto = {
   sessao: Tokens

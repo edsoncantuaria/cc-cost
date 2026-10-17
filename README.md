@@ -45,9 +45,9 @@ At the prompt of a Claude Code session:
 | 🧮 | `19k tokens` | **New tokens** in the session: input + cache writes + output |
 | ↕️ | `↑ 19k  ↓ 30` | Input / output split |
 | ♻️ | `cache 83%` | Share of input served from cache reads — left out of the total, since they resend the same context every request |
-| 📅 | `hoje 156k` | **Today's total** across every session, kept locally for 7 days |
+| 📅 | `today 156k` | **Today's total** across every session, kept locally for 7 days |
 | ⏱️ | `5h 9%  7d 10%` | Subscription usage windows (and spend limit, when set) |
-| 🧠 | `ctx 111k/1,0M` | Current context against the auto-compact window |
+| 🧠 | `ctx 111k/1.0M` | Current context against the auto-compact window |
 | 📈 | `▁▃▅█` | Sparkline of new tokens per turn |
 | 🗜️ | `[ compact ]` | One-key (`c`) compaction, picking the cheaper mode |
 | 🤖 | subagents | Count and largest context while they run; their tokens count toward today, not the session |
@@ -59,6 +59,12 @@ At the prompt of a Claude Code session:
 | 🟢 | comfortable | plenty of room |
 | 🟡 | rising — keep an eye on it | getting close to the compaction window |
 | 🔴 | close to the limit | compact now, before autocompact kicks in |
+
+---
+
+## 🌐 Language
+
+The band and its notices follow your system locale (`LC_ALL`, `LC_MESSAGES`, `LANG`): Portuguese, Spanish, or English for anything else. To pin one, set `cc-cost.language` in `/config` to `en`, `pt-BR` or `es` (`auto` is the default).
 
 ---
 

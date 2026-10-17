@@ -29,13 +29,28 @@ type Mundo = { sessionId: string; store: Map<string, unknown>; mensagens: unknow
 
 function preparar(
   on: On,
-  opcoes: { store?: Record<string, unknown>; rateLimits?: SessionRateLimit[]; janela?: number; mensagens?: unknown[]; abaixo?: string } = {},
+  opcoes: {
+    store?: Record<string, unknown>
+    rateLimits?: SessionRateLimit[]
+    janela?: number
+    mensagens?: unknown[]
+    abaixo?: string
+    env?: Record<string, string>
+    storeQuebrado?: boolean
+  } = {},
 ): Mundo {
   const mundo = { sessionId: 'sessao-a', store: new Map(Object.entries(opcoes.store ?? {})), mensagens: opcoes.mensagens ?? [] }
   mock.clock(on, { now: AGORA })
+  // O idioma sai do locale: os testes leem a faixa em português, salvo quem pede outro.
+  mock.env(on, opcoes.env ?? { LANG: 'pt_BR.UTF-8' })
   // Store em memória à vista do teste, para conferir o que cada sessão gravou.
   on('store.get', (_$, e) => ({ value: mundo.store.get(e.key) }))
-  on('store.set', (_$, e) => (mundo.store.set(e.key, e.value), { value: undefined }))
+  on('store.set', (_$, e) => {
+    if (opcoes.storeQuebrado) throw new Error('disco cheio')
+    mundo.store.set(e.key, e.value)
+
+    return { value: undefined }
+  })
   on('store.delete', (_$, e) => (mundo.store.delete(e.key), { value: undefined }))
   on('store.keys', () => ({ value: [...mundo.store.keys()] }))
   // O que vem depois do mod na cadeia do AbovePrompt: vazio, ou o texto de outro mod.
@@ -480,4 +495,50 @@ test('com pesquisa aberta, só passa adiante', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /tokens/ })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /aviso de outro mod/ }))?.text).toBe('aviso de outro mod')
   await ui.unmount()
+})
+
+test('sem locale português ou espanhol, a faixa sai em inglês', async ($, on) => {
+  preparar(on, { env: { LANG: 'en_US.UTF-8' } })
+  await iniciar($)
+  await turno($, 't1', 'a')
+  await $.session.measure({
+    context: { window: 200000 },
+    rateLimits: [{ kind: 'spend_limit', percentUsed: 10 }],
+    changed: ['rateLimits'],
+  })
+
+  const texto = await faixa($)
+  expect(texto).toMatch(/2\.5k tokens/)
+  expect(texto).toMatch(/today 2\.5k/)
+  expect(texto).toMatch(/limit 10%/)
+})
+
+test('locale espanhol vira a faixa em espanhol', async ($, on) => {
+  preparar(on, { env: { LC_ALL: 'es_AR.UTF-8', LANG: 'en_US.UTF-8' } })
+  await iniciar($)
+  await turno($, 't1', 'a')
+
+  expect(await faixa($)).toMatch(/hoy 2,5k/)
+})
+
+test('a opção language vence o locale', { options: { language: 'en' } }, async ($, on) => {
+  preparar(on)
+  await iniciar($)
+  await turno($, 't1', 'a')
+
+  expect(await faixa($)).toMatch(/today 2\.5k/)
+})
+
+test('store que falha avisa uma vez e não derruba o turno', async ($, on) => {
+  preparar(on, { storeQuebrado: true })
+  const avisos: string[] = []
+  on('ui.toast', (_$, e) => (avisos.push(typeof e === 'string' ? e : JSON.stringify(e)), { value: undefined }))
+  await iniciar($)
+
+  // Os dois turnos terminam: a falha do mod não chega à resposta.
+  await turno($, 't1', 'a')
+  await turno($, 't2', 'a')
+
+  expect(avisos).toHaveLength(1)
+  expect(avisos[0]).toMatch(/a contagem falhou/)
 })

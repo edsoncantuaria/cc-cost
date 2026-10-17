@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelUsage, Register, SessionMessage, SessionRateLimit } from 'claude-code'
+import type { EngineInterface, ModelUsage, PluginOptions, Register, SessionMessage, SessionRateLimit } from 'claude-code'
 
 import type { Gasto, Limite, Modo, Tokens } from '../types'
 
@@ -9,13 +9,14 @@ const compactando = atom({ plugin: 'cc-cost', key: 'compactando' } as const, nul
 const BARRAS = 12
 const DIAS_GUARDADOS = 7
 const NIVEIS = '▁▂▃▄▅▆▇█'
-const ROTULO: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'limite' }
 const ZERO: Tokens = { entrada: 0, saida: 0, cacheLido: 0, cacheEscrito: 0 }
 const VAZIO: Gasto = { sessao: ZERO, hoje: 0, proprio: { chave: '', n: 0 }, turnos: [], emTurno: false, limites: [], contexto: null, janela: null, agentes: {} }
 
 // Folga até a janela de compactação: o vermelho deixa ~30k para compactar antes do autocompact.
 const FOLGA_ATENCAO = 60_000
 const FOLGA_TROCAR = 30_000
+// Janela usada nos limiares até a primeira leitura do engine: a padrão dos modelos de 200k.
+const JANELA_PADRAO = 200_000
 // Chaves que o mod não usa mais: as da versão antiga e o recap do antigo botão "nova sessão".
 const CHAVES_ANTIGAS = ['dia:', 'tokens:', 'ultimoRecap']
 
@@ -26,9 +27,101 @@ const CHARS_POR_TOKEN = 4
 // O marcador que o micro-compaction deixa no lugar do arquivo: o que já foi tirado não conta de novo.
 const ELIDIDO = / elided by compaction: /
 
-const FOCO_COMPACTACAO =
-  'Priorize o que é preciso para continuar o trabalho: objetivo, arquivos alterados (com caminho), ' +
-  'decisões e o porquê, estado atual (testes, o que está quebrado), próximos passos e pendências em aberto.'
+type Idioma = 'en' | 'pt-BR' | 'es'
+type Textos = {
+  decimal: string
+  hoje: string
+  rotulos: Record<string, string>
+  agente: string
+  agentes: (n: number) => string
+  modos: Record<Modo, string>
+  compactando: (modo: Modo) => string
+  foco: string
+  falhaCompactar: (erro: string) => string
+  vermelho: (contexto: string, janela: string | null, faz: string) => string
+  tiraMicro: (lidos: string) => string
+  resume: string
+  microVirouResumo: string
+  falha: (erro: string) => string
+}
+
+const TEXTOS: Record<Idioma, Textos> = {
+  en: {
+    decimal: '.',
+    hoje: 'today',
+    rotulos: { five_hour: '5h', seven_day: '7d', spend_limit: 'limit' },
+    agente: 'agent',
+    agentes: n => `${n} agents, largest`,
+    modos: { micro: 'micro', resumo: 'summary' },
+    compactando: m => `compacting (${TEXTOS.en.modos[m]})…`,
+    foco:
+      'Prioritize what is needed to continue the work: goal, changed files (with paths), ' +
+      'decisions and why, current state (tests, what is broken), next steps and open items.',
+    falhaCompactar: erro => `Could not compact (${erro}); the session stays as it is.`,
+    vermelho: (ctx, janela, faz) => `Context at ${ctx}${janela ? ` of ${janela}` : ''}: "compact" in the band (c) ${faz}, before autocompact.`,
+    tiraMicro: lidos => `removes ~${lidos} of file reads (micro)`,
+    resume: 'summarizes the conversation',
+    microVirouResumo: '/compact micro became a summary: the micro-compaction plugin is not active.',
+    falha: erro => `cc-cost: counting failed (${erro}); the session goes on, the band may lag.`,
+  },
+  'pt-BR': {
+    decimal: ',',
+    hoje: 'hoje',
+    rotulos: { five_hour: '5h', seven_day: '7d', spend_limit: 'limite' },
+    agente: 'agente',
+    agentes: n => `${n} agentes, maior`,
+    modos: { micro: 'micro', resumo: 'resumo' },
+    compactando: m => `compactando (${TEXTOS['pt-BR'].modos[m]})…`,
+    foco:
+      'Priorize o que é preciso para continuar o trabalho: objetivo, arquivos alterados (com caminho), ' +
+      'decisões e o porquê, estado atual (testes, o que está quebrado), próximos passos e pendências em aberto.',
+    falhaCompactar: erro => `Não consegui compactar (${erro}); a sessão continua como está.`,
+    vermelho: (ctx, janela, faz) => `Contexto em ${ctx}${janela ? ` de ${janela}` : ''}: "compact" na faixa (c) ${faz}, antes do autocompact.`,
+    tiraMicro: lidos => `tira ~${lidos} de leituras de arquivo (micro)`,
+    resume: 'resume a conversa',
+    microVirouResumo: 'O /compact micro virou resumo: o plugin micro-compaction não está ativo.',
+    falha: erro => `cc-cost: a contagem falhou (${erro}); a sessão segue, a faixa pode atrasar.`,
+  },
+  es: {
+    decimal: ',',
+    hoje: 'hoy',
+    rotulos: { five_hour: '5h', seven_day: '7d', spend_limit: 'límite' },
+    agente: 'agente',
+    agentes: n => `${n} agentes, mayor`,
+    modos: { micro: 'micro', resumo: 'resumen' },
+    compactando: m => `compactando (${TEXTOS.es.modos[m]})…`,
+    foco:
+      'Prioriza lo necesario para seguir el trabajo: objetivo, archivos modificados (con ruta), ' +
+      'decisiones y el porqué, estado actual (tests, lo que está roto), próximos pasos y pendientes.',
+    falhaCompactar: erro => `No pude compactar (${erro}); la sesión sigue como está.`,
+    vermelho: (ctx, janela, faz) => `Contexto en ${ctx}${janela ? ` de ${janela}` : ''}: "compact" en la franja (c) ${faz}, antes del autocompact.`,
+    tiraMicro: lidos => `quita ~${lidos} de lecturas de archivo (micro)`,
+    resume: 'resume la conversación',
+    microVirouResumo: 'El /compact micro se volvió resumen: el plugin micro-compaction no está activo.',
+    falha: erro => `cc-cost: el conteo falló (${erro}); la sesión sigue, la franja puede atrasarse.`,
+  },
+}
+
+/** `pt_BR.UTF-8` → pt-BR, `es_AR` → es; o resto, inglês. */
+function idiomaDoLocale(locale: string | undefined): Idioma {
+  if (locale === undefined) return 'en'
+  if (/^pt/i.test(locale)) return 'pt-BR'
+  if (/^es/i.test(locale)) return 'es'
+
+  return 'en'
+}
+
+/** A opção `language` do mod; em `auto`, o locale do sistema, como o resto do terminal. */
+async function resolverIdioma($: EngineInterface, opcao: PluginOptions[string] | undefined): Promise<Textos> {
+  if (opcao === 'en' || opcao === 'pt-BR' || opcao === 'es') return TEXTOS[opcao]
+  try {
+    const locale = (await $.env.get('LC_ALL')) || (await $.env.get('LC_MESSAGES')) || (await $.env.get('LANG'))
+
+    return TEXTOS[idiomaDoLocale(locale)]
+  } catch {
+    return TEXTOS.en
+  }
+}
 
 /** Data local AAAA-MM-DD; em ordem alfabética é ordem cronológica. */
 function dia(ms: number): string {
@@ -43,12 +136,12 @@ function novos(t: Tokens): number {
   return t.entrada + t.cacheEscrito + t.saida
 }
 
-/** 950 · 12,4k · 312k · 1,2M — uma casa decimal só abaixo de 10. */
-function compacto(n: number): string {
+/** 950 · 12,4k · 312k · 1,2M — uma casa decimal só abaixo de 10; o separador é o do idioma. */
+function compacto(n: number, decimal: string): string {
   const [valor, sufixo] = n >= 1e6 ? [n / 1e6, 'M'] : n >= 1e3 ? [n / 1e3, 'k'] : [n, '']
   const casas = sufixo && valor < 10 ? 1 : 0
 
-  return valor.toFixed(casas).replace('.', ',') + sufixo
+  return valor.toFixed(casas).replace('.', decimal) + sufixo
 }
 
 function sparkline(valores: number[]): string {
@@ -65,7 +158,7 @@ function cor(pct: number): string {
 }
 
 function limiares(janela: number | null): { atencao: number; trocar: number } {
-  const total = janela ?? 200_000
+  const total = janela ?? JANELA_PADRAO
 
   return { atencao: total - FOLGA_ATENCAO, trocar: total - FOLGA_TROCAR }
 }
@@ -151,10 +244,13 @@ async function somar($: EngineInterface, usage: ModelUsage, principal: boolean) 
   const hoje = dia(await $.clock.now())
   const chave = `novos:${hoje}:${await $.session.id()}`
   const atual = (await read($, gasto)) ?? VAZIO
-  const antes = atual.proprio.chave === chave ? atual.proprio.n : Number((await $.store.get(chave)) ?? 0)
+  const mesmaChave = atual.proprio.chave === chave
+  const antes = mesmaChave ? atual.proprio.n : Number((await $.store.get(chave)) ?? 0)
   const proprio = { chave, n: antes + n }
   await $.store.set(chave, proprio.n)
-  const totalHoje = await somaDoDia($, hoje, proprio)
+  // Na mesma chave o `hoje` já soma as outras sessões: basta somar o passo. As outras sessões
+  // entram de novo no session.measure; varrer o store a cada requisição só se o dia ou a sessão mudou.
+  const totalHoje = mesmaChave ? atual.hoje + n : await somaDoDia($, hoje, proprio)
 
   await update($, gasto, a => {
     const g = a ?? VAZIO
@@ -205,51 +301,86 @@ function modo(lidos: number, contexto: number | null): Modo {
   return contexto !== null && lidos >= contexto * PARTE_MICRO ? 'micro' : 'resumo'
 }
 
+function mensagem(erro: unknown): string {
+  return erro instanceof Error ? erro.message : String(erro)
+}
+
+// Estado do carregamento atual; o register zera a cada carga.
+let opcaoIdioma: PluginOptions[string] | undefined
+let textos: Promise<Textos> | null = null
+let avisado = false
+
+function idioma($: EngineInterface): Promise<Textos> {
+  return (textos ??= resolverIdioma($, opcaoIdioma))
+}
+
+/** O mod só observa: uma falha dele vira um aviso (uma vez por carga), nunca derruba o turno ou a sessão. */
+async function seguro($: EngineInterface, tarefa: () => Promise<unknown>): Promise<void> {
+  try {
+    await tarefa()
+  } catch (erro) {
+    if (avisado) return
+    avisado = true
+    try {
+      $.ui.toast((await idioma($)).falha(mensagem(erro)))
+    } catch {
+      // Nem o aviso saiu: não há mais a quem contar.
+    }
+  }
+}
+
 /**
  * Compacta do jeito que mais rende agora. O micro (plugin micro-compaction) vai como /compact digitado,
  * o único gatilho que o plugin atende. O resumo vai direto, e o ctx recebe aqui o tamanho que ele deixou,
  * porque o hook session.compact deste mod não roda na chamada que o próprio mod faz.
  */
-async function compactar($: EngineInterface) {
+async function compactar($: EngineInterface, t: Textos) {
   if ((await read($, compactando)) !== null) return
-  const escolhido = modo(leituras(await $.session.messages()), (await read($, gasto))?.contexto ?? null)
-  await update($, compactando, () => escolhido)
   try {
+    const escolhido = modo(leituras(await $.session.messages()), (await read($, gasto))?.contexto ?? null)
+    await update($, compactando, () => escolhido)
     if (escolhido === 'micro') {
       await $.command.run({ command: 'compact', args: 'micro' })
       return
     }
-    const r = await $.session.compact({ instructions: FOCO_COMPACTACAO })
+    const r = await $.session.compact({ instructions: t.foco })
     // Vetada por um hook: o próprio engine mostra a linha com o motivo.
     if (r.skip !== undefined) return
     const depois = r.tokensAfter ?? null
     await enfileirar(() => update($, gasto, a => (a ? { ...a, contexto: depois } : a)).then(() => undefined))
   } catch (erro) {
-    $.ui.toast(`Não consegui compactar (${erro instanceof Error ? erro.message : String(erro)}); a sessão continua como está.`)
+    $.ui.toast(t.falhaCompactar(mensagem(erro)))
   } finally {
     await update($, compactando, () => null)
   }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  // Um carregamento novo (reload do mod, outra opção) resolve o idioma e o aviso de falha de novo.
+  opcaoIdioma = options.language
+  textos = null
+  avisado = false
+
   on('session.start', async ($, e, next) => {
-    await enfileirar(async () => {
-      const agora = await $.clock.now()
-      await podar($, agora)
-      const atual = (await read($, gasto)) ?? VAZIO
-      const hoje = await somaDoDia($, dia(agora), atual.proprio)
-      const { rateLimits, context } = await $.session.usage()
-      const janela = await janelaCompactacao($)
-      await update($, gasto, a => ({
-        ...(a ?? VAZIO),
-        hoje,
-        limites: rateLimits.length > 0 ? limites(rateLimits) : (a?.limites ?? []),
-        contexto: context.tokens ?? a?.contexto ?? null,
-        janela,
-        // No reload do mod a lista antiga pode ter agente que já acabou; quem segue rodando volta no próximo passo.
-        agentes: {},
-      }))
-    })
+    await seguro($, () =>
+      enfileirar(async () => {
+        const agora = await $.clock.now()
+        await podar($, agora)
+        const atual = (await read($, gasto)) ?? VAZIO
+        const hoje = await somaDoDia($, dia(agora), atual.proprio)
+        const { rateLimits, context } = await $.session.usage()
+        const janela = await janelaCompactacao($)
+        await update($, gasto, a => ({
+          ...(a ?? VAZIO),
+          hoje,
+          limites: rateLimits.length > 0 ? limites(rateLimits) : (a?.limites ?? []),
+          contexto: context.tokens ?? a?.contexto ?? null,
+          janela,
+          // No reload do mod a lista antiga pode ter agente que já acabou; quem segue rodando volta no próximo passo.
+          agentes: {},
+        }))
+      }),
+    )
 
     return next(e)
   })
@@ -257,27 +388,31 @@ export const register: Register = on => {
   // Só a thread principal abre turno: cada turno é uma barra. O subagente entra na lista dos que rodam.
   on('turn.start', async ($, e, next) => {
     if (e.agentId !== undefined) {
-      await agente($, e.agentId, atual => atual ?? 0)
+      const id = e.agentId
+      await seguro($, () => agente($, id, atual => atual ?? 0))
 
       return next(e)
     }
-    await enfileirar(() =>
-      update($, gasto, a => {
-        const g = a ?? VAZIO
+    await seguro($, () =>
+      enfileirar(() =>
+        update($, gasto, a => {
+          const g = a ?? VAZIO
 
-        return { ...g, turnos: [...g.turnos, 0].slice(-BARRAS), emTurno: true }
-      }).then(() => undefined),
+          return { ...g, turnos: [...g.turnos, 0].slice(-BARRAS), emTurno: true }
+        }).then(() => undefined),
+      ),
     )
 
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId === undefined) {
-      await enfileirar(() => update($, gasto, a => (a ? { ...a, emTurno: false } : a)).then(() => undefined))
-    } else {
-      await agente($, e.agentId, () => null)
-    }
+    const id = e.agentId
+    await seguro($, () =>
+      id === undefined
+        ? enfileirar(() => update($, gasto, a => (a ? { ...a, emTurno: false } : a)).then(() => undefined))
+        : agente($, id, () => null),
+    )
 
     return next(e)
   })
@@ -289,37 +424,42 @@ export const register: Register = on => {
     const usage = resposta.usage
     if (!usage) return resposta
     const id = e.agentId
-    const subagente = id !== undefined && (await read($, gasto))?.agentes?.[id] !== undefined
-    await enfileirar(() => somar($, usage, !subagente))
-    if (subagente) {
-      const ocupado = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
-      await agente($, id, atual => (atual === undefined ? undefined : ocupado))
-    }
+    await seguro($, async () => {
+      const subagente = id !== undefined && (await read($, gasto))?.agentes?.[id] !== undefined
+      await enfileirar(() => somar($, usage, !subagente))
+      if (subagente) {
+        const ocupado = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+        await agente($, id, atual => (atual === undefined ? undefined : ocupado))
+      }
+    })
 
     return resposta
   })
 
   on('session.measure', async ($, e, next) => {
-    await enfileirar(async () => {
-      const atual = (await read($, gasto)) ?? VAZIO
-      const hoje = await somaDoDia($, dia(await $.clock.now()), atual.proprio)
-      const contexto = e.context.tokens ?? atual.contexto
-      await update($, gasto, a => ({
-        ...(a ?? VAZIO),
-        hoje,
-        limites: e.rateLimits.length > 0 ? limites(e.rateLimits) : (a?.limites ?? []),
-        contexto: e.context.tokens ?? a?.contexto ?? null,
-      }))
+    await seguro($, () =>
+      enfileirar(async () => {
+        const atual = (await read($, gasto)) ?? VAZIO
+        const hoje = await somaDoDia($, dia(await $.clock.now()), atual.proprio)
+        const contexto = e.context.tokens ?? atual.contexto
+        await update($, gasto, a => ({
+          ...(a ?? VAZIO),
+          hoje,
+          limites: e.rateLimits.length > 0 ? limites(e.rateLimits) : (a?.limites ?? []),
+          contexto: e.context.tokens ?? a?.contexto ?? null,
+        }))
 
-      // Só na subida pelo limiar: depois do /clear ou de uma compactação o contexto cai e o aviso volta a valer.
-      const { trocar } = limiares(atual.janela)
-      if (contexto !== null && contexto >= trocar && (atual.contexto === null || atual.contexto < trocar)) {
-        const de = atual.janela ? ` de ${compacto(atual.janela)}` : ''
-        const lidos = leituras(await $.session.messages())
-        const faz = modo(lidos, contexto) === 'micro' ? `tira ~${compacto(lidos)} de leituras de arquivo (micro)` : 'resume a conversa'
-        $.ui.toast(`Contexto em ${compacto(contexto)}${de}: "compact" na faixa (c) ${faz}, antes do autocompact.`)
-      }
-    })
+        // Só na subida pelo limiar: depois do /clear ou de uma compactação o contexto cai e o aviso volta a valer.
+        const { trocar } = limiares(atual.janela)
+        if (contexto !== null && contexto >= trocar && (atual.contexto === null || atual.contexto < trocar)) {
+          const t = await idioma($)
+          const lidos = leituras(await $.session.messages())
+          const faz = modo(lidos, contexto) === 'micro' ? t.tiraMicro(compacto(lidos, t.decimal)) : t.resume
+          const janela = atual.janela ? compacto(atual.janela, t.decimal) : null
+          $.ui.toast(t.vermelho(compacto(contexto, t.decimal), janela, faz))
+        }
+      }),
+    )
 
     return next(e)
   })
@@ -329,30 +469,37 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
     if (e.trigger !== 'precompute' && e.agentId === undefined && r.messages) {
-      const informado = r.tokensAfter
-      const saiu = tamanho(e.messages) - tamanho(r.messages)
-      await enfileirar(() =>
-        update($, gasto, a => {
-          if (!a) return a
-          const estimado = a.contexto === null ? null : Math.max(0, a.contexto - saiu)
+      const depoisDela = r.messages
+      await seguro($, async () => {
+        const informado = r.tokensAfter
+        const saiu = tamanho(e.messages) - tamanho(depoisDela)
+        await enfileirar(() =>
+          update($, gasto, a => {
+            if (!a) return a
+            const estimado = a.contexto === null ? null : Math.max(0, a.contexto - saiu)
 
-          return { ...a, contexto: informado ?? estimado }
-        }).then(() => undefined),
-      )
-      // Só o resumo do núcleo informa o tamanho: "micro" com tamanho é o núcleo resumindo, sem o plugin.
-      if (e.instructions?.trim().toLowerCase() === 'micro' && informado !== undefined) {
-        $.ui.toast('O /compact micro virou resumo: o plugin micro-compaction não está ativo.')
-      }
+            return { ...a, contexto: informado ?? estimado }
+          }).then(() => undefined),
+        )
+        // Só o resumo do núcleo informa o tamanho: "micro" com tamanho é o núcleo resumindo, sem o plugin.
+        if (e.instructions?.trim().toLowerCase() === 'micro' && informado !== undefined) {
+          $.ui.toast((await idioma($)).microVirouResumo)
+        }
+      })
     }
 
     return r
   })
+    // Se o hook falhar mesmo assim, a compactação segue como o engine a fez.
+    .catch(($, e, next) => next(e))
 
   // O /clear segue no mesmo processo com outro id e sem session.start: zera só a sessão.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') {
-      await enfileirar(() =>
-        update($, gasto, a => (a ? { ...a, sessao: ZERO, turnos: [], emTurno: false, contexto: null, agentes: {} } : a)).then(() => undefined),
+      await seguro($, () =>
+        enfileirar(() =>
+          update($, gasto, a => (a ? { ...a, sessao: ZERO, turnos: [], emTurno: false, contexto: null, agentes: {} } : a)).then(() => undefined),
+        ),
       )
     }
 
@@ -360,7 +507,19 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const g = await read($, gasto)
+    let g: Gasto | null
+    let t: Textos
+    let agora: number
+    let emCurso: Modo | null
+    try {
+      g = await read($, gasto)
+      t = await idioma($)
+      agora = await $.clock.now()
+      emCurso = await read($, compactando)
+    } catch {
+      // Sem os dados a faixa não tem o que mostrar: a cadeia segue sem ela.
+      return next(e)
+    }
     if (e.props.hasSurvey || g === null) return next(e)
 
     const s = g.sessao
@@ -368,8 +527,7 @@ export const register: Register = on => {
     if (entradaTotal + s.saida === 0 && g.hoje === 0 && g.limites.length === 0 && g.contexto === null) return next(e)
 
     const { Box, Button, Text } = $.ui.resolve(e)
-    const agora = await $.clock.now()
-    const emCurso = await read($, compactando)
+    const k = (n: number) => compacto(n, t.decimal)
     const ocupado = e.props.isWorking || emCurso !== null
     const cache = entradaTotal > 0 ? Math.round((s.cacheLido / entradaTotal) * 100) : 0
     const ponto = <Text dimColor>  ·  </Text>
@@ -381,19 +539,19 @@ export const register: Register = on => {
       <Box paddingX={1} flexDirection="row">
         <Text wrap="truncate-end">
           {g.turnos.length > 0 && <Text color="cyan">{sparkline(g.turnos)}  </Text>}
-          <Text bold>{compacto(novos(s))}</Text>
+          <Text bold>{k(novos(s))}</Text>
           <Text dimColor> tokens</Text>
           {ponto}
           <Text dimColor>↑ </Text>
-          <Text>{compacto(s.entrada + s.cacheEscrito)}</Text>
+          <Text>{k(s.entrada + s.cacheEscrito)}</Text>
           <Text dimColor>  ↓ </Text>
-          <Text>{compacto(s.saida)}</Text>
+          <Text>{k(s.saida)}</Text>
           {ponto}
           <Text dimColor>cache </Text>
           <Text>{cache}%</Text>
           {ponto}
-          <Text dimColor>hoje </Text>
-          <Text bold>{compacto(g.hoje)}</Text>
+          <Text dimColor>{`${t.hoje} `}</Text>
+          <Text bold>{k(g.hoje)}</Text>
           {g.limites.map(l => {
             // A janela já virou e nenhuma resposta nova trouxe o valor: não mostrar o antigo.
             const pct = l.resetsAt && Date.parse(l.resetsAt) <= agora ? 0 : l.percentUsed
@@ -401,7 +559,7 @@ export const register: Register = on => {
             return (
               <Text key={l.kind}>
                 {ponto}
-                <Text dimColor>{ROTULO[l.kind] ?? l.kind} </Text>
+                <Text dimColor>{t.rotulos[l.kind] ?? l.kind} </Text>
                 <Text color={cor(pct)}>{Math.round(pct)}%</Text>
               </Text>
             )
@@ -412,20 +570,20 @@ export const register: Register = on => {
           <Text>
             {ponto}
             <Text dimColor>ctx </Text>
-            <Text color={corContexto(g.contexto, g.janela)}>{compacto(g.contexto)}</Text>
-            {g.janela !== null && <Text dimColor>/{compacto(g.janela)}</Text>}
+            <Text color={corContexto(g.contexto, g.janela)}>{k(g.contexto)}</Text>
+            {g.janela !== null && <Text dimColor>/{k(g.janela)}</Text>}
           </Text>
         )}
         {agentes.length > 0 && (
           <Text>
             {ponto}
-            <Text dimColor>{agentes.length === 1 ? 'agente ' : `${agentes.length} agentes, maior `}</Text>
-            <Text color={corContexto(maior, g.janela)}>{compacto(maior)}</Text>
+            <Text dimColor>{`${agentes.length === 1 ? t.agente : t.agentes(agentes.length)} `}</Text>
+            <Text color={corContexto(maior, g.janela)}>{k(maior)}</Text>
           </Text>
         )}
         <Text>  </Text>
         {ocupado ? (
-          e.props.isWorking ? null : <Text dimColor>compactando ({emCurso})…</Text>
+          e.props.isWorking || emCurso === null ? null : <Text dimColor>{t.compactando(emCurso)}</Text>
         ) : (
           <Button
             key="compactar"
@@ -433,7 +591,7 @@ export const register: Register = on => {
             hotkey="c"
             variant={g.contexto !== null && g.contexto >= limiares(g.janela).trocar ? 'primary' : undefined}
             dimColor={g.contexto === null || g.contexto < limiares(g.janela).atencao}
-            onPress={() => compactar($)}
+            onPress={() => seguro($, () => compactar($, t))}
           />
         )}
       </Box>

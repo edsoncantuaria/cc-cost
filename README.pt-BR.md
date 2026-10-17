@@ -62,6 +62,12 @@ No prompt de uma sessão do Claude Code:
 
 ---
 
+## 🌐 Idioma
+
+A faixa e os avisos seguem o locale do sistema (`LC_ALL`, `LC_MESSAGES`, `LANG`): português, espanhol ou inglês para o resto. Para fixar um, ajuste `cc-cost.language` no `/config` para `en`, `pt-BR` ou `es` (`auto` é o padrão).
+
+---
+
 ## 🗜️ Compactação inteligente
 
 O botão **compact** escolhe o que custa menos:
