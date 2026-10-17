@@ -1,51 +1,80 @@
+<div align="center">
+
 # cc-cost
+
+**What your Claude Code session is really spending — live, above the prompt.**
+
+Tokens, context and your subscription's **5h / 7d windows**, not API dollars.
+
+[![Claude Code](https://img.shields.io/badge/Claude_Code-2.1.287%2B-d97757)](https://claude.com/claude-code)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![No telemetry](https://img.shields.io/badge/network-none-success)](#privacy)
 
 [Português](README.pt-BR.md)
 
-A minimal Claude Code mod that shows a status band above the prompt with what your session is really spending against your **subscription usage windows** (5h / 7d), not API dollars.
+![cc-cost band above the Claude Code prompt](docs/band.png)
 
-```
-243k tokens  ↑ 202k  ↓ 41k  cache 83%  hoje 243k  5h 62%  ▁▃▅█
-```
+</div>
 
-## What it shows
-- **New tokens in the session** (input + cache writes + output). Cache reads are left out, because they resend the same context on every request and would count the conversation many times; they appear as a cache percentage instead.
-- **Today's total**, summed across all sessions (kept locally for 7 days).
-- **Usage limits** from Claude Code: 5h, 7d and spend limit, colored as they rise.
-- **Current context** size against the auto-compact window, turning yellow and then red before autocompact kicks in.
-- **Sparkline** of new tokens per turn.
-- **Running subagents**: count and the largest subagent context, colored against the compaction window. Subagent tokens count toward today but stay out of the session total and the per-turn bars.
-- **Compact button** that picks the cheaper option: `/compact micro` (needs the micro-compaction plugin) when file reads are 40%+ of the context, otherwise the native `/compact` with a focused summary prompt.
-
-## Why not ccusage?
-ccusage estimates API cost in dollars from past logs. On a Pro/Max subscription that number isn't what you pay; the limit that matters is the 5h window, live. cc-cost shows that, inside the session.
-
-## Requirements
-- Claude Code **2.1.287+** with mods (function hooks, early access).
-- Optional: the micro-compaction plugin for the `micro` compaction mode.
+---
 
 ## Install
+
 At the prompt of a Claude Code session:
+
 ```
 /plugin install cc-cost --marketplace edsoncantuaria/cc-cost
 ```
-Answer `y` to add the marketplace, then pick a scope.
 
-### From a local clone (development)
+Answer `y` to add the marketplace, then pick a scope. The band shows up on the next turn.
+
+## Reading the band
+
+| Segment | Meaning |
+| --- | --- |
+| `111k tokens` | New tokens in the session: input + cache writes + output |
+| `↑ 111k  ↓ 73` | Input / output split |
+| `cache 0%` | Share of input served from cache reads (left out of the total, since they resend the same context every request) |
+| `hoje 111k` | Today's total across every session, kept locally for 7 days |
+| `5h 6%  7d 9%` | Subscription usage windows (and spend limit, when set), green → yellow → red |
+| `ctx 111k/1,0M` | Current context against the auto-compact window; turns yellow, then red before autocompact |
+| `▁▃▅█` | Sparkline of new tokens per turn |
+| `[ compact ]` | One-key (`c`) compaction, picking the cheaper mode |
+| subagents | Count and largest subagent context while they run; their tokens count toward today, not the session |
+
+### Smart compaction
+
+The **compact** button picks what costs less:
+
+- **`/compact micro`** when file reads are 40%+ of the context (needs the micro-compaction plugin);
+- otherwise the native **`/compact`** with a focused summary prompt.
+
+When the context turns red, a toast tells you which mode the button will use and how much it frees.
+
+## Why not ccusage?
+
+ccusage estimates **API cost in dollars** from past logs. On a Pro/Max subscription that isn't what you pay — the limit that matters is the **5h window, live**. cc-cost shows that, inside the session.
+
+## Requirements
+
+- Claude Code **2.1.287+** with mods (function hooks, early access).
+- Optional: the micro-compaction plugin for `micro` mode.
+
+## Development
+
 ```bash
 git clone https://github.com/edsoncantuaria/cc-cost ~/.claude/mods/cc-cost
 claude plugin validate ~/.claude/mods/cc-cost
+claude plugin test ~/.claude/mods/cc-cost
 claude --plugin-dir ~/.claude/mods/cc-cost
 ```
-To load it in every session, set `CLAUDE_CODE_PLUGIN_DIRS` to the folder in the `env` block of `~/.claude/settings.json` and restart Claude Code. A folder alone (without one of these) is not loaded.
 
-## Test
-```bash
-claude plugin test ~/.claude/mods/cc-cost
-```
+To load the clone in every session, set `CLAUDE_CODE_PLUGIN_DIRS` to its folder in the `env` block of `~/.claude/settings.json` and restart Claude Code. Copying the folder alone doesn't load it. Don't combine this with the marketplace install, or the band is drawn twice.
 
 ## Privacy
-No network, no telemetry. It only reads the session usage Claude Code provides and stores daily counters in the mod's local store.
+
+No network, no telemetry. It only reads the session usage Claude Code provides and keeps daily counters in the mod's local store.
 
 ## License
-MIT
+
+[MIT](LICENSE)

@@ -317,7 +317,7 @@ export const register: Register = on => {
         const de = atual.janela ? ` de ${compacto(atual.janela)}` : ''
         const lidos = leituras(await $.session.messages())
         const faz = modo(lidos, contexto) === 'micro' ? `tira ~${compacto(lidos)} de leituras de arquivo (micro)` : 'resume a conversa'
-        $.ui.toast(`Contexto em ${compacto(contexto)}${de}: "compactar" na faixa (c) ${faz}, antes do autocompact.`)
+        $.ui.toast(`Contexto em ${compacto(contexto)}${de}: "compact" na faixa (c) ${faz}, antes do autocompact.`)
       }
     })
 
@@ -429,7 +429,7 @@ export const register: Register = on => {
         ) : (
           <Button
             key="compactar"
-            label="compactar"
+            label="compact"
             hotkey="c"
             variant={g.contexto !== null && g.contexto >= limiares(g.janela).trocar ? 'primary' : undefined}
             dimColor={g.contexto === null || g.contexto < limiares(g.janela).atencao}
