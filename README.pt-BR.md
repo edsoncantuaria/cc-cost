@@ -32,11 +32,11 @@ Responda `y` para adicionar o marketplace e escolha o escopo. A faixa aparece no
 
 | Trecho | Significado |
 | --- | --- |
-| `111k tokens` | Tokens novos da sessão: entrada + escrita de cache + saída |
-| `↑ 111k  ↓ 73` | Divisão entre entrada e saída |
-| `cache 0%` | Parcela da entrada servida por leitura de cache (fica fora do total, pois reenvia o mesmo contexto a cada requisição) |
-| `hoje 111k` | Total do dia somando todas as sessões, guardado localmente por 7 dias |
-| `5h 6%  7d 9%` | Janelas de uso da assinatura (e limite de gasto, se houver), verde → amarelo → vermelho |
+| `19k tokens` | Tokens novos da sessão: entrada + escrita de cache + saída |
+| `↑ 19k  ↓ 30` | Divisão entre entrada e saída |
+| `cache 83%` | Parcela da entrada servida por leitura de cache (fica fora do total, pois reenvia o mesmo contexto a cada requisição) |
+| `hoje 156k` | Total do dia somando todas as sessões, guardado localmente por 7 dias |
+| `5h 9%  7d 10%` | Janelas de uso da assinatura (e limite de gasto, se houver), verde → amarelo → vermelho |
 | `ctx 111k/1,0M` | Contexto atual contra a janela do autocompact; fica amarelo e depois vermelho antes dele |
 | `▁▃▅█` | Sparkline de tokens novos por turno |
 | `[ compact ]` | Compactação com uma tecla (`c`), escolhendo o modo mais barato |

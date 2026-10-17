@@ -32,11 +32,11 @@ Answer `y` to add the marketplace, then pick a scope. The band shows up on the n
 
 | Segment | Meaning |
 | --- | --- |
-| `111k tokens` | New tokens in the session: input + cache writes + output |
-| `↑ 111k  ↓ 73` | Input / output split |
-| `cache 0%` | Share of input served from cache reads (left out of the total, since they resend the same context every request) |
-| `hoje 111k` | Today's total across every session, kept locally for 7 days |
-| `5h 6%  7d 9%` | Subscription usage windows (and spend limit, when set), green → yellow → red |
+| `19k tokens` | New tokens in the session: input + cache writes + output |
+| `↑ 19k  ↓ 30` | Input / output split |
+| `cache 83%` | Share of input served from cache reads (left out of the total, since they resend the same context every request) |
+| `hoje 156k` | Today's total across every session, kept locally for 7 days |
+| `5h 9%  7d 10%` | Subscription usage windows (and spend limit, when set), green → yellow → red |
 | `ctx 111k/1,0M` | Current context against the auto-compact window; turns yellow, then red before autocompact |
 | `▁▃▅█` | Sparkline of new tokens per turn |
 | `[ compact ]` | One-key (`c`) compaction, picking the cheaper mode |
