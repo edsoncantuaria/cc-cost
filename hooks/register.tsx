@@ -5,12 +5,13 @@ import type { Limit, Mode, Spend, Tokens } from '../types'
 
 const spend = atom({ plugin: 'cc-cost', key: 'spend' } as const, null)
 const compacting = atom({ plugin: 'cc-cost', key: 'compacting' } as const, null)
+const failing = atom({ plugin: 'cc-cost', key: 'failing' } as const, null)
 
 const BARS = 12
 const DAYS_KEPT = 7
 const LEVELS = '▁▂▃▄▅▆▇█'
 const ZERO: Tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
-const EMPTY: Spend = { session: ZERO, today: 0, day: '', own: { key: '', n: 0 }, turns: [], inTurn: false, limits: [], context: null, window: null, agents: {} }
+const EMPTY: Spend = { session: ZERO, today: 0, day: '', own: { key: '', n: 0 }, turns: [], inTurn: false, limits: [], context: null, window: null, modelWindow: null, agents: {} }
 
 // Headroom to the compaction window: red leaves ~30k to compact before autocompact.
 const WARN_HEADROOM = 60_000
@@ -45,6 +46,7 @@ type Texts = {
   summarizes: string
   microBecameSummary: string
   failed: (error: string) => string
+  stale: string
 }
 
 const TEXTS: Record<Language, Texts> = {
@@ -65,6 +67,7 @@ const TEXTS: Record<Language, Texts> = {
     summarizes: 'summarizes the conversation',
     microBecameSummary: '/compact micro became a summary: the micro-compaction plugin is not active.',
     failed: error => `cc-cost: counting failed (${error}); the session goes on, the band may lag.`,
+    stale: 'stale',
   },
   'pt-BR': {
     decimal: ',',
@@ -83,6 +86,7 @@ const TEXTS: Record<Language, Texts> = {
     summarizes: 'resume a conversa',
     microBecameSummary: 'O /compact micro virou resumo: o plugin micro-compaction não está ativo.',
     failed: error => `cc-cost: a contagem falhou (${error}); a sessão segue, a faixa pode atrasar.`,
+    stale: 'desatualizada',
   },
   es: {
     decimal: ',',
@@ -101,6 +105,7 @@ const TEXTS: Record<Language, Texts> = {
     summarizes: 'resume la conversación',
     microBecameSummary: 'El /compact micro se volvió resumen: el plugin micro-compaction no está activo.',
     failed: error => `cc-cost: el conteo falló (${error}); la sesión sigue, la franja puede atrasarse.`,
+    stale: 'desactualizada',
   },
 }
 
@@ -313,16 +318,37 @@ function message(error: unknown): string {
 let languageOption: PluginOptions[string] | undefined
 let texts: Promise<Texts> | null = null
 let warned = false
+// Hooks whose last run failed, mirrored in the `failing` atom only when the set changes.
+let broken = new Set<string>()
 
 function language($: EngineInterface): Promise<Texts> {
   return (texts ??= resolveTexts($, languageOption))
 }
 
-/** The mod only observes: a failure of its own becomes a notice (once per load), never takes down the turn or the session. */
-async function safe($: EngineInterface, task: () => Promise<unknown>): Promise<void> {
+/** Mirrors `broken` in the band's state; a state that fails too leaves only the toast. */
+async function markBroken($: EngineInterface, hook: string, failed: boolean) {
+  if (broken.has(hook) === failed) return
+  broken = new Set(broken)
+  if (failed) broken.add(hook)
+  else broken.delete(hook)
+  const now = broken.size > 0 ? [...broken] : null
+  try {
+    await update($, failing, () => now)
+  } catch {
+    // The toast already went out (or will): the band just misses the marker.
+  }
+}
+
+/**
+ * The mod only observes: a failure of its own never takes down the turn or the session. The toast
+ * goes out once per load; the band stays marked while `hook` keeps failing and clears on its next success.
+ */
+async function safe($: EngineInterface, hook: string, task: () => Promise<unknown>): Promise<void> {
   try {
     await task()
+    await markBroken($, hook, false)
   } catch (error) {
+    await markBroken($, hook, true)
     if (warned) return
     warned = true
     try {
@@ -364,9 +390,10 @@ export const register: Register = (on, options) => {
   languageOption = options.language
   texts = null
   warned = false
+  broken = new Set()
 
   on('session.start', async ($, e, next) => {
-    await safe($, () =>
+    await safe($, 'session.start', () =>
       enqueue(async () => {
         const now = await $.clock.now()
         await prune($, now)
@@ -382,6 +409,7 @@ export const register: Register = (on, options) => {
           limits: rateLimits.length > 0 ? limits(rateLimits) : (a?.limits ?? []),
           context: context.tokens ?? a?.context ?? null,
           window,
+          modelWindow: context.window,
           // On a mod reload the old list may hold an agent already done; those still running come back on their next step.
           agents: {},
         }))
@@ -394,7 +422,7 @@ export const register: Register = (on, options) => {
   // Only the main thread opens a turn: each turn is a bar. A subagent goes into the list of running ones.
   on('turn.start', async ($, e, next) => {
     const id = e.agentId
-    await safe($, () =>
+    await safe($, 'turn.start', () =>
       enqueue(() =>
         id !== undefined
           ? setAgent($, id, current => current ?? 0)
@@ -411,7 +439,7 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const id = e.agentId
-    await safe($, () =>
+    await safe($, 'turn.complete', () =>
       enqueue(() =>
         id === undefined
           ? update($, spend, a => (a ? { ...a, inTurn: false } : a))
@@ -429,7 +457,7 @@ export const register: Register = (on, options) => {
     const usage = response.usage
     if (!usage) return response
     const id = e.agentId
-    await safe($, () =>
+    await safe($, 'turn.step', () =>
       // Inside the queue: a subagent's turn.start that came before this step is already in the list.
       enqueue(async () => {
         if (id === undefined || (await read($, spend))?.agents?.[id] === undefined) return add($, usage, true)
@@ -443,28 +471,31 @@ export const register: Register = (on, options) => {
   })
 
   on('session.measure', async ($, e, next) => {
-    await safe($, () =>
+    await safe($, 'session.measure', () =>
       enqueue(async () => {
         const current = (await read($, spend)) ?? EMPTY
         const today = day(await $.clock.now())
         const todayTotal = await daySum($, today, current.own)
         const context = e.context.tokens ?? current.context
+        // /model (or a new autoCompactWindow) moves the model's window: the compaction window comes along, measured again.
+        const window = e.context.window !== current.modelWindow ? await compactionWindow($) : current.window
         await update($, spend, a => ({
           ...(a ?? EMPTY),
           today: todayTotal,
           day: today,
           limits: e.rateLimits.length > 0 ? limits(e.rateLimits) : (a?.limits ?? []),
           context: e.context.tokens ?? a?.context ?? null,
+          window,
+          modelWindow: e.context.window,
         }))
 
         // Only on the way up through the threshold: after /clear or a compaction the context drops and the notice applies again.
-        const limit = thresholds(current.window).switch
+        const limit = thresholds(window).switch
         if (context !== null && context >= limit && (current.context === null || current.context < limit)) {
           const t = await language($)
           const share = readShare(await $.session.messages())
           const does = mode(share) === 'micro' ? t.dropsReads(Math.round(share * 100)) : t.summarizes
-          const window = current.window ? short(current.window, t.decimal) : null
-          $.ui.toast(t.red(short(context, t.decimal), window, does))
+          $.ui.toast(t.red(short(context, t.decimal), window ? short(window, t.decimal) : null, does))
         }
       }),
     )
@@ -478,7 +509,7 @@ export const register: Register = (on, options) => {
     const r = await next(e)
     if (e.trigger !== 'precompute' && e.agentId === undefined && r.messages) {
       const afterIt = r.messages
-      await safe($, async () => {
+      await safe($, 'session.compact', async () => {
         const reported = r.tokensAfter
         const removed = Math.round((chars(e.messages) - chars(afterIt)) / CHARS_PER_TOKEN)
         await enqueue(() =>
@@ -506,7 +537,7 @@ export const register: Register = (on, options) => {
   // /clear goes on in the same process with another id and no session.start: only the session resets.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') {
-      await safe($, () =>
+      await safe($, 'session.end', () =>
         enqueue(() =>
           update($, spend, a => (a ? { ...a, session: ZERO, turns: [], inTurn: false, context: null, agents: {} } : a)),
         ),
@@ -521,11 +552,13 @@ export const register: Register = (on, options) => {
     let t: Texts
     let now: number
     let running: Mode | null
+    let stale: boolean
     try {
       s = await read($, spend)
       t = await language($)
       now = await $.clock.now()
       running = await read($, compacting)
+      stale = (await read($, failing)) !== null
     } catch {
       // Without the data the band has nothing to show: the chain goes on without it.
       return next(e)
@@ -534,7 +567,7 @@ export const register: Register = (on, options) => {
 
     const ss = s.session
     const inputTotal = ss.input + ss.cacheRead + ss.cacheWrite
-    if (inputTotal + ss.output === 0 && s.today === 0 && s.limits.length === 0 && s.context === null) return next(e)
+    if (inputTotal + ss.output === 0 && s.today === 0 && s.limits.length === 0 && s.context === null && !stale) return next(e)
 
     const { Box, Button, Text } = $.ui.resolve(e)
     const k = (n: number) => short(n, t.decimal)
@@ -551,6 +584,7 @@ export const register: Register = (on, options) => {
     const band = (
       <Box paddingX={1} flexDirection="row">
         <Text wrap="truncate-end">
+          {stale && <Text color="yellow">{`⚠ ${t.stale}  `}</Text>}
           {s.turns.length > 0 && <Text color="cyan">{sparkline(s.turns)}  </Text>}
           <Text bold>{k(fresh(ss))}</Text>
           <Text dimColor> tokens</Text>
@@ -604,7 +638,7 @@ export const register: Register = (on, options) => {
             hotkey="c"
             variant={s.context !== null && s.context >= limit.switch ? 'primary' : undefined}
             dimColor={s.context === null || s.context < limit.warn}
-            onPress={() => safe($, () => compactNow($, t))}
+            onPress={() => safe($, 'compact', () => compactNow($, t))}
           />
         )}
       </Box>

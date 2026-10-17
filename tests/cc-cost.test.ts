@@ -25,7 +25,7 @@ const USAGES: Record<string, { input_tokens: number; output_tokens: number; cach
   compaction: { input_tokens: 0, output_tokens: 5000, cache_read_input_tokens: 168_000, cache_creation_input_tokens: 0 },
 }
 
-type World = { sessionId: string; store: Map<string, unknown>; messages: unknown[]; clock: MockClock }
+type World = { sessionId: string; store: Map<string, unknown>; messages: unknown[]; clock: MockClock; window?: number; brokenStore?: boolean }
 
 function setup(
   on: On,
@@ -40,13 +40,20 @@ function setup(
   } = {},
 ): World {
   const clock = mock.clock(on, { now: NOW })
-  const world = { sessionId: 'session-a', store: new Map(Object.entries(opts.store ?? {})), messages: opts.messages ?? [], clock }
+  const world: World = {
+    sessionId: 'session-a',
+    store: new Map(Object.entries(opts.store ?? {})),
+    messages: opts.messages ?? [],
+    clock,
+    window: opts.window,
+    brokenStore: opts.brokenStore,
+  }
   // The language comes from the locale: the tests read the band in Portuguese, unless one asks for another.
   mock.env(on, opts.env ?? { LANG: 'pt_BR.UTF-8' })
   // In-memory store in the test's view, to check what each session wrote.
   on('store.get', (_$, e) => ({ value: world.store.get(e.key) }))
   on('store.set', (_$, e) => {
-    if (opts.brokenStore) throw new Error('disk full')
+    if (world.brokenStore) throw new Error('disk full')
     world.store.set(e.key, e.value)
 
     return { value: undefined }
@@ -65,7 +72,7 @@ function setup(
   on('session.messages', () => ({ value: world.messages as never }))
   // Without `window` no breakdown comes and the model's window (200k) applies.
   on('session.usage', (_$, e) => {
-    const breakdown = e.breakdown && opts.window ? { breakdown: { rawMaxTokens: opts.window } as never } : {}
+    const breakdown = e.breakdown && world.window ? { breakdown: { rawMaxTokens: world.window } as never } : {}
 
     return { value: { startedAt: NOW, context: { window: 200000, ...breakdown }, rateLimits: opts.rateLimits ?? [] } }
   })
@@ -430,6 +437,24 @@ test('the context thresholds come from the compaction window', async ($, on) => 
   }
 })
 
+test('a new model window measures the compaction window again', async ($, on) => {
+  const world = setup(on)
+  await start($)
+
+  await context($, 150_000)
+  let ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
+  expect((await ui.find({ type: 'Text', text: /^150k$/ }))?.props.color).toBe('yellow')
+  await ui.unmount()
+
+  // /model to a 1M model: the engine reports the new window on the next measure.
+  world.window = 1_000_000
+  await $.session.measure({ context: { tokens: 150_000, window: 1_000_000 }, rateLimits: [], changed: ['context'] })
+  ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
+  expect((await ui.find({ type: 'Text', text: /^150k$/ }))?.props.color).toBe('green')
+  expect(await ui.find({ type: 'Text', text: '/1,0M' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('warns once on entering red and again after the context drops', async ($, on) => {
   setup(on)
   const notices = collectToasts(on)
@@ -623,4 +648,21 @@ test('a failing store warns once and does not take down the turn', async ($, on)
 
   expect(notices).toHaveLength(1)
   expect(notices[0]).toMatch(/a contagem falhou/)
+})
+
+test('the band stays marked while counting fails and clears once it works again', async ($, on) => {
+  const world = setup(on, { brokenStore: true })
+  collectToasts(on)
+  await start($)
+
+  await turn($, 't1', 'a')
+  await turn($, 't2', 'a')
+  // Nothing counted yet, but the band shows to say so.
+  expect(await band($)).toMatch(/^⚠ desatualizada {2}.*0 tokens/)
+
+  world.brokenStore = false
+  await turn($, 't3', 'a')
+  const text = await band($)
+  expect(text).not.toMatch(/⚠/)
+  expect(text).toMatch(/hoje 2,5k/)
 })

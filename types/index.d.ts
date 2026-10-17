@@ -22,13 +22,15 @@ export type Spend = {
   context: number | null
   /** Compaction window (autoCompactWindow) the ctx thresholds come from; null until the first reading. */
   window: number | null
+  /** The model's window (`context.window`) `window` was measured under: when it moves, `window` is measured again. */
+  modelWindow: number | null
   /** Context of each running subagent (input of its last response), 0 before the first; ctx is the main thread's only. */
   agents?: Record<string, number>
 }
 
 declare module 'claude-code' {
   interface PluginState {
-    /** `compacting`: which compaction the button is running; null outside one. */
-    'cc-cost': { spend: Spend | null; compacting: Mode | null }
+    /** `compacting`: which compaction the button is running; null outside one. `failing`: hooks whose last run failed; null when all are fine. */
+    'cc-cost': { spend: Spend | null; compacting: Mode | null; failing: string[] | null }
   }
 }
