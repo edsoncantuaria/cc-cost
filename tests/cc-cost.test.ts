@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
-import type { On, RenderElement, SessionRateLimit } from 'claude-code'
+import type { AgentInfo, On, RenderElement, SessionRateLimit } from 'claude-code'
 
 const BAND = {
   component: 'AbovePrompt',
@@ -37,6 +37,7 @@ function setup(
     below?: string
     env?: Record<string, string>
     brokenStore?: boolean
+    agents?: AgentInfo[]
   } = {},
 ): World {
   const clock = mock.clock(on, { now: NOW })
@@ -69,6 +70,8 @@ function setup(
   })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: world.sessionId }))
+  // The subagents $.agent.list() names; engine forks (compaction) are never among them.
+  on('agent.list', () => ({ value: opts.agents ?? [] }))
   on('session.messages', () => ({ value: world.messages as never }))
   // Without `window` no breakdown comes and the model's window (200k) applies.
   on('session.usage', (_$, e) => {
@@ -224,6 +227,24 @@ test("a subagent step racing its turn.start still counts as the subagent's", asy
   await ui.unmount()
   const text = await band($)
   // Out of the session (the bar is t1's, still empty), into today.
+  expect(text).toMatch(/▁ {2}0 tokens/)
+  expect(text).toMatch(/hoje 240k/)
+})
+
+test('a subagent already running when the mod reloads comes back on its next step', async ($, on) => {
+  setup(on, { agents: [{ id: 'agent-1', description: 'task', type: 'general-purpose', status: 'running' }] })
+  await start($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await $.turn.start({ text: 'task', turnId: 'sub1', agentId: 'agent-1' })
+  // The reload: session.start empties the list while agent-1 keeps running.
+  await start($)
+  await step($, 'sub1', 'b', 'agent-1')
+
+  const ui = await $.ui.mount({ plugin: 'cc-cost', surface: 'terminal', ...BAND })
+  expect(await ui.find({ type: 'Text', text: 'agente ' })).toBeDefined()
+  await ui.unmount()
+  const text = await band($)
+  // Out of the session and the bar, into today.
   expect(text).toMatch(/▁ {2}0 tokens/)
   expect(text).toMatch(/hoje 240k/)
 })

@@ -30,7 +30,8 @@ export const register: Register = (on, options) => {
           context: context.tokens ?? a?.context ?? null,
           window,
           modelWindow: context.window,
-          // On a mod reload the old list may hold an agent already done; those still running come back on their next step.
+          // On a mod reload the old list may hold an agent already done; those still running come back on their
+          // next step, recognized by $.agent.list().
           agents: {},
         }))
       }),
@@ -80,7 +81,11 @@ export const register: Register = (on, options) => {
     await safe($, rt, 'turn.step', () =>
       // Inside the queue: a subagent's turn.start that came before this step is already in the list.
       rt.enqueue(async () => {
-        if (id === undefined || (await readSpend($))?.agents?.[id] === undefined) return add($, usage, true)
+        if (id === undefined) return add($, usage, true)
+        // Out of the list: an engine fork (compaction), which $.agent.list() does not name, or a subagent
+        // whose turn.start came before a mod reload, which it does and goes back into the list.
+        const known = (await readSpend($))?.agents?.[id] !== undefined
+        if (!known && !(await $.agent.list()).some(a => a.id === id)) return add($, usage, true)
         await add($, usage, false)
         const occupied = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
         await setAgent($, id, () => occupied)
